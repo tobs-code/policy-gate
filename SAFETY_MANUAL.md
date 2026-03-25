@@ -529,9 +529,18 @@ cargo test  # Uses dev-test-token from config
 
 **Security Model:**
 1. Attacker cannot learn token from Apache-2.0 published source (no token there)
-2. Attacker in same process must guess the 32-byte build-time secret
-3. Binary without correct token simply won't compile/deploy
+2. Attacker must guess 32-byte build-time secret
+3. Binary without token won't compile/deploy
 4. Defense-in-depth: OnceLock still enforces "init exactly once"
+
+**Important — Token is NOT a Secret:**
+The build-time token is embedded as plaintext in the binary. It can be extracted via `strings policy-gate-binary` or hex dump. **This is by design and acceptable for SA-073's threat model** (preventing race-to-init from untrusted code in the same process).
+
+**Do NOT treat the token as a credential:**
+- It is a **build guard**, not an authentication secret
+- It will appear in CI/CD logs, build scripts, and the binary
+- Do not use it for API authentication, encryption keys, or access control
+- For compliance-grade audit integrity, use external HSM (SA-075)
 
 **Deployment Checklist:**
 - [ ] `POLICY_GATE_INIT_TOKEN` generated securely (openssl rand -hex 32)
