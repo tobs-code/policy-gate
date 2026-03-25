@@ -6,7 +6,7 @@
 //   3. Timing: Normalisierung muss innerhalb des Watchdog-Budgets bleiben
 
 use firewall_core::fsm::WATCHDOG_DEADLINE_US;
-use firewall_core::{init_with_token, FirewallProfile, evaluate, evaluate_raw, PromptInput, VerdictKind, BlockReason, MatchedIntent, ChannelDecision, ChannelId, AdvisoryTag};
+use firewall_core::*;
 use std::time::Instant;
 
 fn init_once() {

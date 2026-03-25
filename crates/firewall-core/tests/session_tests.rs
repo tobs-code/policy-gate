@@ -1,7 +1,7 @@
 // session_tests.rs — SA-076: Session-Aware-Layer Tests
 
-use firewall_core::{evaluate_with_session, PromptInput, VerdictKind, BlockReason};
-use firewall_core::session::{SessionManager, SessionAnalysis, SessionRiskLevel, EscalationIndicator, SessionFlag};
+use firewall_core::{evaluate_with_session, init, PromptInput, VerdictKind};
+use firewall_core::session::{SessionFlag, SessionManager, SessionRiskLevel};
 
 #[test]
 fn session_manager_initialization() {
@@ -52,7 +52,7 @@ fn escalation_score_increases_with_indicators() {
     let analysis = manager.add_message(session_id, &last_input, VerdictKind::Pass, None);
     
     // Should have some escalation score based on message patterns
-    assert!(analysis.escalation_score >= 0);
+    let _ = analysis.escalation_score;
 }
 
 #[test]
@@ -74,7 +74,7 @@ fn session_cleanup_removes_expired_sessions() {
 
 #[test]
 fn evaluate_with_session_integration() {
-    firewall_core::init_with_token("test_token_for_development_only_12345678901234567890123456789012", firewall_core::FirewallProfile::Default).expect("init failed");
+    init().expect("init failed");
     
     let input = PromptInput::new("What is the capital of France?").expect("Valid input");
     let verdict = evaluate_with_session("test-session", &input, 1);

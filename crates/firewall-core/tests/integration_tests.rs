@@ -9,10 +9,7 @@
 //   - Types: PromptInput normalisation, Verdict helpers
 //   - Property-based: boundary conditions via proptest
 
-use firewall_core::{
-    evaluate, evaluate_raw, init_with_token, AdvisoryTag, BlockReason, ChannelDecision, ChannelId,
-    MatchedIntent, PromptInput, VerdictKind,
-};
+use firewall_core::*;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 

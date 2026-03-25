@@ -103,7 +103,7 @@ impl SessionManager {
         let message = SessionMessage {
             sequence: session.messages.len() as u64 + 1,
             timestamp_ns: now,
-            input_hash: crate::sha256_hex(&input.text),
+            input_hash: crate::audit::sha256_hex(&input.text),
             verdict,
             block_reason,
             escalation_indicators: self.analyze_message_indicators(&input.text, &session.messages),

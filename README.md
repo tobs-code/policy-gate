@@ -20,10 +20,24 @@ It is designed for teams that want predictable enforcement, auditable decisions,
 - fail-closed behavior on ambiguity, disagreement, or fault
 - auditable PASS/BLOCK outcomes
 - advisory heuristics and semantic analysis kept outside the safety path
-- **session-aware multi-turn conversation memory** for detecting escalation attacks
+- optional session-aware analysis for multi-turn escalation patterns
 - Rust core with Node, Python, and WASM targets
 
-## Why this project exists
+## Best fit
+
+`policy-gate` is a good fit when only a small, well-defined set of user intents should ever reach a model or downstream toolchain.
+
+Typical examples:
+
+- fronting an agent that can call tools or execute multi-step workflows
+- enforcing tenant- or profile-specific prompt policies
+- validating model output for prompt leakage, credential leakage, or PII
+- creating a reviewable PASS/BLOCK layer in front of LLM APIs
+- detecting multi-turn escalation attempts across conversation turns
+
+It is a weaker fit for broad, open-ended chatbot moderation or any workflow where the allowed intent space is large and fluid.
+
+## Why this approach
 
 Most AI guardrails are probabilistic classifiers. They can be useful, but they are often hard to reason about, hard to audit, and difficult to bound in high-control environments.
 
@@ -32,23 +46,26 @@ Most AI guardrails are probabilistic classifiers. They can be useful, but they a
 - allow only known-good intent shapes
 - block unknown or ambiguous requests by default
 - keep the safety path deterministic
-- treat AI-assisted analysis as advisory, not authoritative
-- **detect multi-turn escalation attacks** through session memory
+- treat heuristic and semantic analysis as advisory, not authoritative
 - produce audit records for every decision
 
-The core idea is simple: for some systems, it is better to make unsafe requests unrepresentable than to estimate whether they look risky.
+For narrow workflows, it is often better to make unsafe requests unrepresentable than to estimate whether they look risky.
 
-## Best first use case
+## Guarantees and non-goals
 
-The best fit is an internal or customer-facing AI workflow where only a small, well-defined set of user intents should ever reach the model or downstream tools.
+What `policy-gate` aims to provide:
 
-Examples:
+- deterministic PASS/BLOCK behavior on the core safety path
+- fail-closed handling for ambiguity, disagreement, and internal faults
+- reviewable audit output for each decision
+- optional advisory analysis that never overrides the core verdict
 
-- fronting an agent that can call tools or execute multi-step workflows
-- enforcing tenant- or profile-specific prompt policies
-- validating model output for prompt leakage, credential leakage, or PII
-- creating a reviewable PASS/BLOCK layer in front of LLM APIs
-- **detecting multi-turn escalation attacks** with session memory
+What it does not aim to be:
+
+- a general-purpose conversational safety layer
+- a replacement for policy design, threat modeling, or human review
+- a certification-grade safety system
+- a claim of IEC 61508 compliance
 
 ## Quick example
 
@@ -72,7 +89,7 @@ if (!verdict.isPass) {
 // safe to forward to the model
 ```
 
-### Session-Aware Evaluation
+### Session-aware evaluation
 
 ```ts
 import { Firewall } from "policy-gate";
@@ -83,7 +100,7 @@ const firewall = await Firewall.create({
   },
 });
 
-// Session-aware evaluation for multi-turn conversations
+// Optional session-aware evaluation for multi-turn conversations
 const sessionId = "user-123";
 const verdict = await firewall.evaluateWithSession(
   sessionId,
@@ -147,7 +164,7 @@ For egress validation, the same philosophy is applied to model responses through
 - Channel diversity: the main channels use different techniques to reduce common-mode failure.
 - Advisory isolation: heuristic and semantic signals never override the safety decision.
 - Auditable operation: every decision can be recorded and analyzed later.
-- **Init authorization (SA-073):** Build-time token prevents race-to-init attacks; no default secrets in source code.
+- Init authorization: build-time token prevents race-to-init attacks; no default secrets in source code.
 
 ## Main components
 
@@ -165,12 +182,12 @@ This channel runs after the verdict and stores non-authoritative heuristics in t
 
 ### Channel D: semantic similarity
 
-This is an optional advisory feature with **production-grade semantic analysis**:
+This is an optional advisory feature:
 
 - **8 learned attack centroids** derived from AdvBench + JailbreakBench via MiniLM + K-Means
 - **384-dimensional embeddings** using `sentence-transformers/all-MiniLM-L6-v2`
-- **IEC 61508 systematic capability process**: Reference datasets → Feature extraction → Clustering → Hard-coding → CI tripwire
-- Centroid hash verification ensures any semantic boundary changes are detected and require safety case review
+- reference-dataset pipeline: feature extraction → clustering → hard-coding → CI tripwire
+- centroid hash verification ensures semantic-boundary changes are detected and reviewed
 - Advisory-only: never gates PASS/BLOCK outcomes, but provides semantic violation tags for operator review
 
 *See `scripts/generate_centroids.py` for the centroid generation pipeline.*
@@ -191,7 +208,7 @@ The output side validates model responses against the original prompt and checks
 - teams building agents with tool use or multi-step workflows
 - platform engineers adding a control layer in front of LLM APIs
 - security-minded builders who prefer deterministic policy enforcement
-- researchers exploring high-assurance guardrail architectures
+- researchers exploring deterministic guardrail architectures
 
 ## Project layout
 

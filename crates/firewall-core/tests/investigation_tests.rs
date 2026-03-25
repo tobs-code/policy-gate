@@ -7,7 +7,7 @@
 // are marked #[ignore] — they require release builds or fast CI environments.
 
 use firewall_core::fsm::WATCHDOG_DEADLINE_US;
-use firewall_core::{init_with_token, FirewallProfile, evaluate, evaluate_raw, PromptInput, VerdictKind, BlockReason, MatchedIntent, ChannelDecision, ChannelId, AdvisoryTag};
+use firewall_core::*;
 use std::time::Instant;
 
 fn eval(text: &str) -> firewall_core::Verdict {

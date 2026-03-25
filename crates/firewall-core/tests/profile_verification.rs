@@ -1,10 +1,11 @@
-use firewall_core::{init_with_token, FirewallProfile, evaluate, evaluate_raw, PromptInput, VerdictKind, BlockReason, MatchedIntent, ChannelDecision, ChannelId, AdvisoryTag};
+use firewall_core::*;
 
 #[test]
 fn test_code_assistant_profile_filtering() {
     // Initialize with CodeAssistant profile
     // Factual (IP-001) should pass
     // Translation (IP-012) should be blocked (downgraded)
+    #[allow(deprecated)]
     let _ = init_with_profile(FirewallProfile::CodeAssistant);
 
     let res_factual = evaluate_raw("What is a linked list?", 1);

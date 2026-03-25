@@ -16,7 +16,7 @@
 //   GAP-09: Sprachliche Umgehung (Synonyme, Euphemismen)
 //   GAP-10: Strukturelle Längen-Angriffe
 
-use firewall_core::{init_with_token, FirewallProfile, evaluate, evaluate_raw, PromptInput, VerdictKind, BlockReason, MatchedIntent, ChannelDecision, ChannelId, AdvisoryTag};
+use firewall_core::*;
 
 fn must_block(label: &str, input: &str) {
     init().expect("init");
