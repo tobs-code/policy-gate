@@ -41,6 +41,18 @@ use voter::Voter;
 // Fail-closed: if init() was never called or failed → Block verdict returned.
 static INIT_RESULT: OnceLock<Result<(), String>> = OnceLock::new();
 
+// ─── Init Authorization Guard (SA-073) ────────────────────────────────────────
+//
+// Race-to-init protection: The first successful init() caller "owns" the
+// initialization. To prevent unauthorized init() calls from winning the race,
+// we optionally require an init token from a controlled source (environment
+// variable or deployment orchestrator).
+//
+// If INIT_TOKEN_ENV is set, init_with_token() must be called with matching token.
+// If not set, legacy init() behavior applies (first caller wins — documented risk).
+static INIT_TOKEN_ENV: OnceLock<Option<String>> = OnceLock::new();
+const DEFAULT_INIT_TOKEN: &str = "policy-gate-default-init-token-v1";
+
 // ─── Active profile (SA-047) ─────────────────────────────────────────────────
 //
 // Stores the permitted-intent set for the active profile. None = Default (all intents).
@@ -100,8 +112,51 @@ pub fn next_sequence() -> u64 {
 /// If init() is never called, evaluate() and evaluate_raw() return a fail-closed
 /// Block verdict with BlockReason::MalformedInput("not initialised") — they never
 /// panic or produce a Pass verdict without a successful init().
+///
+/// # Security Note
+/// This function uses a default init token. For production deployments where
+/// multiple components might race to init(), use `init_with_token()` with a
+/// controlled token from environment variable or deployment orchestrator.
+/// See SA-073 (Race-to-init protection) in SAFETY_MANUAL.md.
 pub fn init() -> Result<(), FirewallInitError> {
-    init_with_profile(FirewallProfile::Default)
+    // Load expected token from environment (if set) or use default
+    let expected_token = INIT_TOKEN_ENV
+        .get_or_init(|| std::env::var("POLICY_GATE_INIT_TOKEN").ok())
+        .clone()
+        .unwrap_or_else(|| DEFAULT_INIT_TOKEN.to_string());
+    
+    init_with_token(&expected_token, FirewallProfile::Default)
+}
+
+/// Initialise with explicit token authorization (SA-073).
+///
+/// This function requires the caller to provide the init token, preventing
+/// unauthorized components from winning the init() race. The token should
+/// be provided by a controlled source (environment variable, secret manager,
+/// or deployment orchestrator) and not hardcoded in application code.
+///
+/// # Arguments
+/// * `token` - The init authorization token. Must match POLICY_GATE_INIT_TOKEN
+///   environment variable if set, or DEFAULT_INIT_TOKEN if not set.
+/// * `profile` - The firewall profile to use for this initialization.
+///
+/// # Errors
+/// Returns `FirewallInitError::UnauthorizedInit` if the token does not match
+/// the expected value.
+pub fn init_with_token(token: &str, profile: FirewallProfile) -> Result<(), FirewallInitError> {
+    // Verify token before any state mutation
+    let expected_token = INIT_TOKEN_ENV
+        .get_or_init(|| std::env::var("POLICY_GATE_INIT_TOKEN").ok())
+        .clone()
+        .unwrap_or_else(|| DEFAULT_INIT_TOKEN.to_string());
+    
+    if token != expected_token {
+        return Err(FirewallInitError::UnauthorizedInit(
+            "Init token mismatch — possible race-to-init attack or misconfiguration".into()
+        ));
+    }
+    
+    init_with_profile_internal(profile)
 }
 
 /// Initialise the firewall with a specific deployment profile.
@@ -115,7 +170,19 @@ pub fn init() -> Result<(), FirewallInitError> {
 ///
 /// # Safety Actions
 /// SA-047: Multi-tenant profile system.
+/// SA-073: Race-to-init protection via internal init_with_profile_internal.
 pub fn init_with_profile(profile: FirewallProfile) -> Result<(), FirewallInitError> {
+    // For backward compatibility: use default token check
+    let expected_token = INIT_TOKEN_ENV
+        .get_or_init(|| std::env::var("POLICY_GATE_INIT_TOKEN").ok())
+        .clone()
+        .unwrap_or_else(|| DEFAULT_INIT_TOKEN.to_string());
+    
+    init_with_token(&expected_token, profile)
+}
+
+/// Internal implementation — assumes token already verified.
+fn init_with_profile_internal(profile: FirewallProfile) -> Result<(), FirewallInitError> {
     // Validate custom pattern regex before touching INIT_RESULT
     if let Some((id, regex, _intent)) = profile.custom_pattern() {
         regex::Regex::new(regex).map_err(|e| {
@@ -181,12 +248,14 @@ pub(crate) fn get_config() -> Option<&'static config::FirewallConfig> {
 #[derive(Debug)]
 pub enum FirewallInitError {
     PatternCompileFailure(String),
+    UnauthorizedInit(String),
 }
 
 impl std::fmt::Display for FirewallInitError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::PatternCompileFailure(e) => write!(f, "Pattern compile failure: {}", e),
+            Self::UnauthorizedInit(e) => write!(f, "Unauthorized init attempt: {}", e),
         }
     }
 }

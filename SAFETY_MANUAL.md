@@ -507,6 +507,47 @@ The FSM intent classification patterns (Channel A) include multilingual support 
 
 **Pattern Integrity:** Z3-tripwire test (`verification/check_pattern_hash.py`) enforces SHA-256 hash verification of safety-critical pattern files — unauthorized pattern changes cause CI failure and require Z3 model re-verification.
 
+### 7.4 Race-to-Init Vulnerability (SA-073)
+
+The firewall uses `OnceLock<INIT_RESULT>` and `OnceLock<ACTIVE_PROFILE_INTENTS>` — the first successful `init()` caller "owns" the initialization. In multi-threaded or multi-component deployments, a malicious or misconfigured caller could win the race with unsafe parameters.
+
+**Safety Action SA-073:** Init Authorization Guard
+- `init_with_token(token, profile)` requires explicit authorization token
+- Token source: `POLICY_GATE_INIT_TOKEN` environment variable (production) or default token (development)
+- `FirewallInitError::UnauthorizedInit` returned on token mismatch
+- Legacy `init()` retains backward compatibility with default token
+
+**Deployment Requirement:** Production deployments MUST set `POLICY_GATE_INIT_TOKEN` and call `init_with_token()` from a controlled, trusted initialization path. The init sequence is a security-critical deployment step.
+
+### 7.5 Channel D Coverage Gaps (SA-074)
+
+Channel D (Semantic/Embeddings) uses a lightweight static subword-embedding path with hardcoded 4-dimensional vectors (~8 subwords in prototype). This provides fast semantic analysis (<1ms) but has significant coverage limitations:
+
+**Coverage Limitations:**
+- Limited subword vocabulary: does not cover synonyms, transliterations, or novel obfuscation patterns outside the hardcoded table
+- Advisory-only mode: Channel D never gates Pass/Block verdicts by design
+- ONNX alternative available: `semantic` feature flag enables full ONNX Runtime path, but increases binary size and latency
+
+**Residual Risk:** Operators may develop false confidence from "Channel D shows no signal" — but no signal ≠ no risk. Channel D gaps do not compromise safety (advisory-only), but may reduce visibility into sophisticated semantic attacks.
+
+**Mitigation:** Treat Channel D as supplementary signal only. Safety decisions remain with Channel A/B deterministic channels. For high-security deployments, use the ONNX semantic path (`--features semantic`) with a comprehensive embedding model.
+
+### 7.6 HMAC Key Management (SA-075)
+
+The audit HMAC chain provides tamper-evidence within the process using `HMAC(key, entry_data + prev_hmac)`. The key is:
+- Generated from process-specific entropy at init time
+- Stored in `OnceLock<[u8; 32]>` (process memory only)
+- Not persisted to external key management (HSM/KMS)
+
+**Limitation:** This design provides tamper-evidence against retrospective audit modification within the process, but does not provide compliance-grade non-repudiation. A compromised process could theoretically access the key and forge subsequent entries.
+
+**Mitigation:** For compliance deployments requiring external non-repudiation, extend the architecture with:
+- External HSM or KMS for HMAC key storage
+- Signed audit entries with hardware-backed keys
+- Separate audit ingestion service with its own key hierarchy
+
+**Current Scope:** Internal tamper-evidence for operational debugging and incident investigation, not regulatory compliance.
+
 ---
 
 ## 7. Traceability Matrix

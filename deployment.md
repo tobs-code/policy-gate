@@ -1,10 +1,50 @@
 # Deployment Guide — policy-gate
 
 **Safety Action SA-022 — External Process Watchdog (DA-01)**
+**Safety Action SA-073 — Init Authorization Guard**
 
-This document specifies the mandatory external watchdog requirements for production deployments of `policy-gate`. It addresses the gap between the internal Rust watchdog (FSM-internal hangs) and OS-level thread starvation (DA-01, DC-GAP-04).
+This document specifies the mandatory deployment requirements for production use of `policy-gate`. It covers:
+1. External process watchdog (DA-01)
+2. Init authorization and token management (SA-073)
+3. Runtime configuration and environment assumptions
 
 > **Key distinction:** The internal 50 ms watchdog (SA-004) detects FSM-internal hangs. It does **not** protect against OS preemption, VM live-migration, SIGSTOP, or OOM-kill, where the thread never resumes and the internal watchdog never fires. An external process watchdog is required for full DA-01 coverage.
+
+---
+
+## 0. Initialization Security (SA-073 — Critical)
+
+The firewall uses `OnceLock<INIT_RESULT>` — the first successful `init()` caller "owns" the initialization. **This is a security-critical deployment step.**
+
+### Production Requirement
+
+Set `POLICY_GATE_INIT_TOKEN` environment variable and use `init_with_token()`:
+
+```bash
+# Generate a random token (store in secret manager)
+export POLICY_GATE_INIT_TOKEN=$(openssl rand -hex 32)
+
+# Application code
+policy_gate::init_with_token(
+    std::env::var("POLICY_GATE_INIT_TOKEN").expect("SA-073: POLICY_GATE_INIT_TOKEN required"),
+    FirewallProfile::Default
+).expect("Firewall init failed");
+```
+
+### Deployment Checklist
+
+- [ ] `POLICY_GATE_INIT_TOKEN` set in production environment (not in code)
+- [ ] Token stored in secret manager (KMS, Vault, etc.) — not in config files
+- [ ] Init called from trusted, controlled initialization path
+- [ ] Token rotation procedure documented (if compromised)
+- [ ] Monitoring: Alert on `FirewallInitError::UnauthorizedInit` in logs
+
+### Anti-Pattern (Do Not Use in Production)
+
+```rust
+// ❌ DO NOT: Hardcoded token, predictable, no environment control
+policy_gate::init(); // Only for development/testing
+```
 
 ---
 
