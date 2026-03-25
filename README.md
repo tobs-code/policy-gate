@@ -109,6 +109,7 @@ For egress validation, the same philosophy is applied to model responses through
 - Channel diversity: the main channels use different techniques to reduce common-mode failure.
 - Advisory isolation: heuristic and semantic signals never override the safety decision.
 - Auditable operation: every decision can be recorded and analyzed later.
+- **Init authorization (SA-073):** Build-time token prevents race-to-init attacks; no default secrets in source code.
 
 ## Main components
 
@@ -126,7 +127,15 @@ This channel runs after the verdict and stores non-authoritative heuristics in t
 
 ### Channel D: semantic similarity
 
-This is an optional advisory feature. Default builds keep it disabled. The current implementation uses a lightweight static subword-embedding path and writes similarity information to the audit log without changing PASS/BLOCK outcomes.
+This is an optional advisory feature with **production-grade semantic analysis**:
+
+- **8 learned attack centroids** derived from AdvBench + JailbreakBench via MiniLM + K-Means
+- **384-dimensional embeddings** using `sentence-transformers/all-MiniLM-L6-v2`
+- **IEC 61508 systematic capability process**: Reference datasets → Feature extraction → Clustering → Hard-coding → CI tripwire
+- Centroid hash verification ensures any semantic boundary changes are detected and require safety case review
+- Advisory-only: never gates PASS/BLOCK outcomes, but provides semantic violation tags for operator review
+
+*See `scripts/generate_centroids.py` for the centroid generation pipeline.*
 
 ### Egress firewall
 
