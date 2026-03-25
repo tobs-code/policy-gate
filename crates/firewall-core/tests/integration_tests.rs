@@ -10,20 +10,20 @@
 //   - Property-based: boundary conditions via proptest
 
 use firewall_core::{
-    evaluate, evaluate_raw, init, AdvisoryTag, BlockReason, ChannelDecision, ChannelId,
+    evaluate, evaluate_raw, init_with_token, AdvisoryTag, BlockReason, ChannelDecision, ChannelId,
     MatchedIntent, PromptInput, VerdictKind,
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 fn eval(text: &str) -> firewall_core::Verdict {
-    init().expect("init() must succeed");
+    init_with_token("dev-test-token-not-for-production-123456789012", firewall_core::FirewallProfile::Default).expect("init() must succeed");
     let input = PromptInput::new(text).expect("PromptInput::new failed in test");
     evaluate(input, 0)
 }
 
 fn eval_seq(text: &str, seq: u64) -> firewall_core::Verdict {
-    init().expect("init() must succeed");
+    init_with_token("dev-test-token-not-for-production-123456789012", firewall_core::FirewallProfile::Default).expect("init() must succeed");
     let input = PromptInput::new(text).expect("PromptInput::new failed in test");
     evaluate(input, seq)
 }

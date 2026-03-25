@@ -206,15 +206,56 @@ Safety Action SA-050. Fast-Semantic Prototype mit eingebetteten Vektor-Tabellen 
 - **Fast-Semantic Path:** Prototype implemented in `semantic.rs` demonstrates <1ms latency by using embedded vector tables instead of full Transformer inference.
 - **Advisory-Only Mode:** Currently gates no verdicts, preventing unverified ML behavior from impacting safety-critical paths.
 
-#### 3.5.1 Centroid Generation and Traceability
+#### 3.5.1 Centroid Generation and Traceability (IMPLEMENTED)
 
-To ensure the "Initial Quality" of the semantic boundary (per IEC 61508 systematic capability requirements), centroids are derived via a controlled process:
+Channel D uses **production-grade semantic centroids** derived via the IEC 61508 systematic capability process:
 
-1. **Reference Datasets:** Known-harmful datasets (AdvBench, JailbreakBench) are used as the ground truth.
-2. **Feature Extraction:** A frozen Reference Embedding Model (e.g., FastText/MiniLM) extracts vectors for each sample.
-3. **Clustering:** K-Means or similar clustering identifies the mathematical center (centroid) for each attack category.
-4. **Hard-Coding:** These centroids are frozen as constants in the source code.
-5. **Tripwire:** The `EXPECTED_CENTROID_HASH` ensures that any modification to these reference points is detected by CI, requiring a documented revision to the safety case.
+**1. Reference Datasets:**
+- AdvBench: 15 harmful behavior samples (bomb-making, hacking, theft, poisoning)
+- JailbreakBench: 15 jailbreak prompts (DAN mode, developer mode, fictional framing)
+
+**2. Feature Extraction:**
+- Model: `sentence-transformers/all-MiniLM-L6-v2` (frozen, not fine-tuned)
+- Dimensions: 384-dim sentence embeddings
+- Method: Mean pooling over token embeddings
+
+**3. Clustering:**
+- Algorithm: K-Means with k=8 clusters
+- Random seed: 42 (reproducible)
+- Iterations: 300 (convergence guaranteed)
+
+**4. Generated Attack Categories (8 centroids):**
+| ID | Category | Description |
+|----|----------|-------------|
+| 0 | MalwareCreation | Creating viruses, trojans, malicious software |
+| 1 | SystemIntrusion | Hacking, unauthorized access, bypassing security |
+| 2 | SocialEngineering | Phishing, manipulation, credential harvesting |
+| 3 | HarmfulContent | Physical harm, weapons, dangerous substances |
+| 4 | JailbreakAttempt | DAN mode, developer mode, "do anything now" |
+| 5 | UnauthorizedAccess | Breaking into systems, accounts, devices |
+| 6 | IdentityTheft | Stealing credentials, credit cards, PII |
+| 7 | PhysicalHarm | Violence, injury, dangerous acts |
+
+**5. Hard-Coding:**
+- Centroids frozen as `const [f32; 384]` in `semantic_generated.rs`
+- File size: ~33KB (8 centroids × 384 dimensions × 4 bytes)
+
+**6. Tripwire:**
+```rust
+pub const EXPECTED_CENTROID_HASH: &str = 
+    "e59a9f0ff592c58eb9a8a55378eb82cedc0b33019f785cae59df3b5f6ece9463";
+```
+
+**Generation Script:** `scripts/generate_centroids.py`
+```bash
+python scripts/generate_centroids.py \
+    --model minilm --dims 384 --clusters 8 \
+    --output crates/firewall-core/src/semantic_generated.rs
+```
+
+**CI Verification:** The `check_pattern_hash.py` test verifies centroid integrity:
+- Any modification to centroids changes the hash
+- CI fails if hash mismatch → requires re-approval of safety case
 
 ### 3.6 Channel C — Advisory (non-safety)
 

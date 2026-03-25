@@ -1,6 +1,6 @@
 // tests/egress_tests.rs — Integration tests for Output Firewall (Egress)
 
-use firewall_core::{init, evaluate_output, VerdictKind, PromptInput};
+use firewall_core::{init_with_token, FirewallProfile, evaluate, evaluate_raw, PromptInput, VerdictKind, BlockReason, MatchedIntent, ChannelDecision, ChannelId, AdvisoryTag};
 
 #[test]
 fn egress_blocks_system_prompt_leakage() {

@@ -1,4 +1,4 @@
-use firewall_core::{evaluate_raw, init_with_profile, FirewallProfile, MatchedIntent, ChannelDecision};
+use firewall_core::{init_with_token, FirewallProfile, evaluate, evaluate_raw, PromptInput, VerdictKind, BlockReason, MatchedIntent, ChannelDecision, ChannelId, AdvisoryTag};
 
 #[test]
 fn test_code_assistant_profile_filtering() {
