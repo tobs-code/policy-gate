@@ -113,14 +113,24 @@ prompt ──► [Normalise NFKC] ──► [Channel A: FSM]       ─┐
                                                                       (non-safety, outside safety boundary)
 
 **Egress Pipeline (Output):**
-```
-
 prompt + response ──► [Normalise Response] ──► [Channel E: FSM/PII] ─┐
 ├──► [Channel F: Rule] ─┼──► [1oo2 Voter] ──► PASS/EgressBlock
 └─────────────────────────┘
 
-```
-                                                              └──► [Channel C: Advisory]
+### 3.3 Channel E — Egress FSM/PII
+
+Specialized in detecting System Prompt Leakage via a sliding window (default 20 chars, configurable via `WINDOW_SIZE`) and PII detection. Uses unified normalization to match obfuscated prompt content.
+
+**Hardenings (SA-069):**
+
+- **Significance Filter:** To prevent false positives in code-heavy responses (e.g., `public static void main`), a match is only blocked if it contains at least 10 "significant" characters (non-boilerplate keywords).
+- **Keyword Set:** Includes ~60 common programming keywords (Rust, Python, TS, SQL) that are ignored during significance calculation.
+
+### 3.4 Channel F — Egress Rule Engine
+
+Specialized in detecting high-entropy/obfuscated leakage (e.g., Base64 blobs) and framing violations (e.g., "internalsecretprotocol"). Provides technical diversity from the FSM-based approach of Channel E.
+
+### 3.5 Channel A — FSM                                                          └──► [Channel C: Advisory]
                                                                       (non-safety, outside safety boundary)
 
 *\*Note: Channel D (Semantic) is an optional, advisory-only feature. Default builds currently compile without it (`firewall-core` uses `default = []`). Enable it explicitly with `--features semantic` when semantic analysis should be compiled in. WASM/Edge builds typically keep it disabled to preserve the zero-dependency, sub-millisecond path.*
@@ -477,13 +487,25 @@ The firewall is an **Allowlist-based** system.
 
 ### 7.3 Multilingual Limitations (SA-049)
 
-The FSM intent classification patterns (Channel A) and Rule Engine (Channel B) are designed primarily for English.
+The FSM intent classification patterns (Channel A) include multilingual support for common acknowledgements and greetings across 10+ languages. The Rule Engine (Channel B) remains primarily English-focused.
 
-- **Limitation:** Legitimate prompts in other languages (German, French, etc.) may not match the primary intent allowlist.
-- **Residual Risk:** High fail-closed rate (NoIntentMatch) for non-English users.
-- **Mitigation:** Multilingual support is currently focused on the polyglot Semantic path (Channel D) and specific cross-lingual tokens in greetings/acknowledgements.
+**Current Multilingual Coverage in Channel A:**
+- **German:** `danke`
+- **French:** `merci`
+- **Spanish:** `gracias`
+- **Italian:** `grazie`
+- **Portuguese:** `obrigado/obrigada`
+- **Japanese (romanised):** `arigato/arigatou/arigatō`
+- **Russian (romanised):** `spasibo`
+- **Arabic (romanised):** `shukran`
+- **Danish/Norwegian:** `tak`
+- **Swedish:** `tack`
 
-Z3-tripwire test (`z3_tripwire_pattern_count`) enforces `EXPECTED_PATTERN_COUNT = 13` — adding a pattern without updating the Z3 model causes a CI failure.
+- **Limitation:** Complex legitimate prompts in non-English languages beyond basic acknowledgements may not match the primary intent allowlist.
+- **Residual Risk:** Moderate fail-closed rate (NoIntentMatch) for non-English users with complex intents.
+- **Mitigation:** Channel A provides multilingual acknowledgement support; Channel D (Semantic path) offers additional polyglot analysis capabilities.
+
+**Pattern Integrity:** Z3-tripwire test (`verification/check_pattern_hash.py`) enforces SHA-256 hash verification of safety-critical pattern files — unauthorized pattern changes cause CI failure and require Z3 model re-verification.
 
 ---
 
@@ -495,7 +517,7 @@ Z3-tripwire test (`z3_tripwire_pattern_count`) enforces `EXPECTED_PATTERN_COUNT 
 | SR-002             | H-02   | Channel B: zero regex, zero ML                                   | `rule_engine/rules.rs`                                     | PO-RE1…PO-RE8        | `channel_b_*` tests                               |
 | SR-003             | H-03   | Watchdog in Rust, not Node.js                                    | `fsm/mod.rs::WallClock`                                    | PO-A2                | `watchdog_fires_at_deadline`                      |
 | SR-004             | H-04   | Audit emitted before verdict returned                            | `lib.rs::evaluate`                                         | —                    | `audit_entry_has_nonzero_elapsed`                 |
-| SR-005             | H-05   | CR process + Z3-tripwire                                         | `intent_patterns.rs::z3_tripwire_pattern_count`            | PO-A6, PO-A7         | `z3_tripwire_pattern_count`                       |
+| SR-005             | H-05   | CR process + Z3-tripwire                                         | `verification/check_pattern_hash.py`            | PO-A6, PO-A7         | `pattern_hash_verification`                       |
 | SR-006             | H-06   | `init()` must be called and checked                              | `lib.rs::init`, `fsm::startup_self_test`                   | —                    | `init_succeeds_on_valid_patterns`                 |
 | SR-007             | H-07   | DiagnosticDisagreement → operator review 24h                     | `types.rs::VerdictKind`, caller contract                   | PO-V9                | `voter_diagnostic_disagreement_is_not_pass`       |
 | SR-008             | —      | DiagnosticAgreement → operator review 72h                        | `types.rs::VerdictKind`, caller contract                   | PO-V10               | `voter_diagnostic_agreement_is_pass`              |
@@ -541,7 +563,7 @@ The voter's DiagnosticAgreement and DiagnosticDisagreement events provide contin
 | OC-05 | `DiagnosticAgreement` events must trigger operator review within 72 hours.                                            | Caller contract.                                                                                        | SR-008       |
 | OC-06 | The `firewall-napi` binding is NOT part of the safety function. The safety-critical boundary is `firewall-core` only. | Architectural — `firewall-napi` has `#![deny(clippy::all)]` but not `#![forbid(unsafe_code)]`.          | Architecture |
 | OC-07 | Channel C output must never gate the Pass/Block decision.                                                             | Enforced by architecture: Channel C runs after the voter, result only written to `AuditEntry.advisory`. | SA-008       |
-| OC-08 | Adding a new intent pattern requires: CR → peer review → Z3 re-proof → Safety Manual addendum.                        | Enforced at CI level by `z3_tripwire_pattern_count` test.                                               | SR-005       |
+| OC-08 | Adding a new intent pattern requires: CR → peer review → Z3 re-proof → Safety Manual addendum.                        | Enforced at CI level by `verification/check_pattern_hash.py` test.                                               | SR-005       |
 | OC-09 | The caller MUST pass the same `PromptInput` reference used in the Ingress evaluation to `evaluate_output()`.          | Caller contract (G-35).                                                                                 | SR-018       |
 
 **SA-021 note:** Prior to SA-021, `firewall_init()` and `firewall_evaluate()` were independent napi exports with no runtime link. A JS caller could invoke `firewall_evaluate()` without `firewall_init()`, silently bypassing SR-006. SA-021 closes this via `INIT_RESULT: OnceLock<Result<(), String>>` checked at the top of every `firewall_evaluate()` call. The `get_or_init` pattern ensures init is attempted exactly once even if `firewall_init()` was never explicitly called — the first `firewall_evaluate()` triggers it and returns `Err` if it fails. Direct `firewall-core` consumers remain a code-review obligation (DC-GAP-05).
@@ -738,7 +760,7 @@ The voter's DiagnosticAgreement and DiagnosticDisagreement events provide contin
 | OC-05 | `DiagnosticAgreement` events must trigger operator review within 72 hours.                                            | Caller contract.                                                                                        | SR-008       |
 | OC-06 | The `firewall-napi` binding is NOT part of the safety function. The safety-critical boundary is `firewall-core` only. | Architectural — `firewall-napi` has `#![deny(clippy::all)]` but not `#![forbid(unsafe_code)]`.          | Architecture |
 | OC-07 | Channel C output must never gate the Pass/Block decision.                                                             | Enforced by architecture: Channel C runs after the voter, result only written to `AuditEntry.advisory`. | SA-008       |
-| OC-08 | Adding a new intent pattern requires: CR → peer review → Z3 re-proof → Safety Manual addendum.                        | Enforced at CI level by `z3_tripwire_pattern_count` test.                                               | SR-005       |
+| OC-08 | Adding a new intent pattern requires: CR → peer review → Z3 re-proof → Safety Manual addendum.                        | Enforced at CI level by `verification/check_pattern_hash.py` test.                                               | SR-005       |
 | OC-09 | The caller MUST pass the same `PromptInput` reference used in the Ingress evaluation to `evaluate_output()`.          | Caller contract (G-35).                                                                                 | SR-018       |
 
 **SA-021 note:** Prior to SA-021, `firewall_init()` and `firewall_evaluate()` were independent napi exports with no runtime link. A JS caller could invoke `firewall_evaluate()` without `firewall_init()`, silently bypassing SR-006. SA-021 closes this via `INIT_RESULT: OnceLock<Result<(), String>>` checked at the top of every `firewall_evaluate()` call. The `get_or_init` pattern ensures init is attempted exactly once even if `firewall_init()` was never explicitly called — the first `firewall_evaluate()` triggers it and returns `Err` if it fails. Direct `firewall-core` consumers remain a code-review obligation (DC-GAP-05).
