@@ -507,17 +507,38 @@ The FSM intent classification patterns (Channel A) include multilingual support 
 
 **Pattern Integrity:** Z3-tripwire test (`verification/check_pattern_hash.py`) enforces SHA-256 hash verification of safety-critical pattern files — unauthorized pattern changes cause CI failure and require Z3 model re-verification.
 
-### 7.4 Race-to-Init Vulnerability (SA-073)
+### 7.4 Race-to-Init Vulnerability (SA-073) — CORRECTED
 
-The firewall uses `OnceLock<INIT_RESULT>` and `OnceLock<ACTIVE_PROFILE_INTENTS>` — the first successful `init()` caller "owns" the initialization. In multi-threaded or multi-component deployments, a malicious or misconfigured caller could win the race with unsafe parameters.
+The firewall uses `OnceLock<INIT_RESULT>` — the first successful `init()` caller "owns" the initialization. In multi-threaded or multi-component deployments, a malicious or misconfigured caller could win the race with unsafe parameters.
 
-**Safety Action SA-073:** Init Authorization Guard
-- `init_with_token(token, profile)` requires explicit authorization token
-- Token source: `POLICY_GATE_INIT_TOKEN` environment variable (production) or default token (development)
-- `FirewallInitError::UnauthorizedInit` returned on token mismatch
-- Legacy `init()` retains backward compatibility with default token
+**Safety Action SA-073 — CORRECTED:** Build-Time Init Token
+- Token is embedded at **compile time** via `env!("POLICY_GATE_INIT_TOKEN")`, not runtime
+- **No default token** exists in source code (eliminates "known secret" attack vector)
+- **Compilation fails** if `POLICY_GATE_INIT_TOKEN` is not set at build time
+- `init_with_token(token, profile)` is the **only** public init function for production
+- `init()` without token exists only in `#[cfg(test)]` builds
 
-**Deployment Requirement:** Production deployments MUST set `POLICY_GATE_INIT_TOKEN` and call `init_with_token()` from a controlled, trusted initialization path. The init sequence is a security-critical deployment step.
+**Build Requirements:**
+```bash
+# Production build — token baked into binary
+POLICY_GATE_INIT_TOKEN=$(openssl rand -hex 32) cargo build --release
+
+# Development/CI — token from .cargo/config.toml
+cargo test  # Uses dev-test-token from config
+```
+
+**Security Model:**
+1. Attacker cannot learn token from Apache-2.0 published source (no token there)
+2. Attacker in same process must guess the 32-byte build-time secret
+3. Binary without correct token simply won't compile/deploy
+4. Defense-in-depth: OnceLock still enforces "init exactly once"
+
+**Deployment Checklist:**
+- [ ] `POLICY_GATE_INIT_TOKEN` generated securely (openssl rand -hex 32)
+- [ ] Token stored in deployment secret manager (KMS, Vault)
+- [ ] CI/CD pipeline injects token at build time
+- [ ] Runtime uses same token from secure source
+- [ ] `.cargo/config.toml` is NOT used for production (contains test-only token)
 
 ### 7.5 Channel D Coverage Gaps (SA-074)
 

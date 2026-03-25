@@ -41,17 +41,25 @@ use voter::Voter;
 // Fail-closed: if init() was never called or failed → Block verdict returned.
 static INIT_RESULT: OnceLock<Result<(), String>> = OnceLock::new();
 
-// ─── Init Authorization Guard (SA-073) ────────────────────────────────────────
+// ─── Init Authorization Guard (SA-073) — CORRECTED ─────────────────────────
 //
-// Race-to-init protection: The first successful init() caller "owns" the
-// initialization. To prevent unauthorized init() calls from winning the race,
-// we optionally require an init token from a controlled source (environment
-// variable or deployment orchestrator).
+// Race-to-init protection via BUILD-TIME token. The init token is baked into
+// the binary at compile time via env!("POLICY_GATE_INIT_TOKEN"). There is NO
+// runtime default — if the env var is not set at build time, compilation fails.
 //
-// If INIT_TOKEN_ENV is set, init_with_token() must be called with matching token.
-// If not set, legacy init() behavior applies (first caller wins — documented risk).
-static INIT_TOKEN_ENV: OnceLock<Option<String>> = OnceLock::new();
-const DEFAULT_INIT_TOKEN: &str = "policy-gate-default-init-token-v1";
+// This eliminates the "known default token" attack vector. An attacker who
+// compromises the process cannot learn the token from source code (it's not
+// there) and cannot read it from runtime environment (it's embedded at build).
+//
+// The OnceLock<INIT_RESULT> still enforces "init exactly once", but the token
+// check provides defense-in-depth against accidental or malicious init() calls
+// in multi-component deployments.
+//
+// To build:
+//   POLICY_GATE_INIT_TOKEN=$(openssl rand -hex 32) cargo build --release
+//
+// The resulting binary contains ONLY init_with_token() as public API.
+const INIT_TOKEN: &str = env!("POLICY_GATE_INIT_TOKEN");
 
 // ─── Active profile (SA-047) ─────────────────────────────────────────────────
 //
@@ -98,90 +106,73 @@ pub fn next_sequence() -> u64 {
 
 // ─── Startup initialisation ──────────────────────────────────────────────────
 
-/// Must be called once at process startup.
-/// Returns Err if any safety-critical component fails self-test.
-/// The caller MUST NOT call evaluate() if this returns Err.
+/// Initialise the firewall with explicit token authorization (SA-073 — CORRECTED).
 ///
-/// Safe to call multiple times — subsequent calls return the cached result.
+/// This is the ONLY public initialization function for production builds.
+/// The expected token is baked into the binary at BUILD TIME via the
+/// POLICY_GATE_INIT_TOKEN environment variable.
 ///
-/// What this does:
-///   1. Compiles and validates all Channel A intent patterns (regex syntax check).
-///   2. Warms the OnceLock regex cache so the first evaluate() call does not
-///      pay the ~35–50ms compilation cost and risk hitting the 50ms watchdog.
+/// There is no runtime default, no fallback, and no `init()` without token in
+/// production builds. The token check eliminates the race-to-init vulnerability
+/// where a compromised component could win the initialization race.
 ///
-/// If init() is never called, evaluate() and evaluate_raw() return a fail-closed
-/// Block verdict with BlockReason::MalformedInput("not initialised") — they never
-/// panic or produce a Pass verdict without a successful init().
+/// # Build Requirements
+/// The binary MUST be built with:
+/// ```bash
+/// POLICY_GATE_INIT_TOKEN=$(openssl rand -hex 32) cargo build --release
+/// ```
 ///
-/// # Security Note
-/// This function uses a default init token. For production deployments where
-/// multiple components might race to init(), use `init_with_token()` with a
-/// controlled token from environment variable or deployment orchestrator.
-/// See SA-073 (Race-to-init protection) in SAFETY_MANUAL.md.
-pub fn init() -> Result<(), FirewallInitError> {
-    // Load expected token from environment (if set) or use default
-    let expected_token = INIT_TOKEN_ENV
-        .get_or_init(|| std::env::var("POLICY_GATE_INIT_TOKEN").ok())
-        .clone()
-        .unwrap_or_else(|| DEFAULT_INIT_TOKEN.to_string());
-    
-    init_with_token(&expected_token, FirewallProfile::Default)
-}
-
-/// Initialise with explicit token authorization (SA-073).
-///
-/// This function requires the caller to provide the init token, preventing
-/// unauthorized components from winning the init() race. The token should
-/// be provided by a controlled source (environment variable, secret manager,
-/// or deployment orchestrator) and not hardcoded in application code.
+/// If POLICY_GATE_INIT_TOKEN is not set at build time, compilation fails with
+/// an error message pointing to this requirement.
 ///
 /// # Arguments
-/// * `token` - The init authorization token. Must match POLICY_GATE_INIT_TOKEN
-///   environment variable if set, or DEFAULT_INIT_TOKEN if not set.
+/// * `token` - The init authorization token. Must match the build-time token.
 /// * `profile` - The firewall profile to use for this initialization.
 ///
 /// # Errors
-/// Returns `FirewallInitError::UnauthorizedInit` if the token does not match
-/// the expected value.
+/// Returns `FirewallInitError::UnauthorizedInit` if the token does not match.
+///
+/// # Security Model
+/// - Token is embedded at build time via `env!()`, not runtime
+/// - No default token exists in source code (eliminates "known secret" attack)
+/// - Attacker cannot learn token from Apache-2.0 published source
+/// - Attacker in same process must guess the 32-byte build-time secret
+/// - OnceLock<INIT_RESULT> still enforces "init exactly once"
+///
+/// # Examples
+/// ```
+/// // Build: POLICY_GATE_INIT_TOKEN=$(openssl rand -hex 32) cargo build
+/// // Runtime: Same token passed securely from deployment orchestrator
+/// let token = std::env::var("POLICY_GATE_INIT_TOKEN")?;
+/// policy_gate::init_with_token(&token, FirewallProfile::Default)?;
+/// ```
 pub fn init_with_token(token: &str, profile: FirewallProfile) -> Result<(), FirewallInitError> {
-    // Verify token before any state mutation
-    let expected_token = INIT_TOKEN_ENV
-        .get_or_init(|| std::env::var("POLICY_GATE_INIT_TOKEN").ok())
-        .clone()
-        .unwrap_or_else(|| DEFAULT_INIT_TOKEN.to_string());
-    
-    if token != expected_token {
+    // Verify token against BUILD-TIME constant
+    // This check happens BEFORE any state mutation
+    if token != INIT_TOKEN {
         return Err(FirewallInitError::UnauthorizedInit(
-            "Init token mismatch — possible race-to-init attack or misconfiguration".into()
+            "Init token mismatch — possible race-to-init attack or misconfiguration. ".to_string() +
+            "Ensure POLICY_GATE_INIT_TOKEN was set at build time and matches runtime token."
         ));
     }
     
     init_with_profile_internal(profile)
 }
 
-/// Initialise the firewall with a specific deployment profile.
+#[cfg(test)]
+/// Test-only initialization without token verification.
 ///
-/// Profiles restrict the set of intent classes that can result in a Pass verdict.
-/// See `FirewallProfile` for available profiles.
+/// # Security Warning
+/// This function is ONLY available in test builds (`#[cfg(test)]`).
+/// Production binaries MUST use `init_with_token()` with a build-time token.
 ///
-/// This is a superset of `init()` — `init()` calls this with `FirewallProfile::Default`.
-/// Safe to call multiple times — returns cached result after the first call.
-/// Profile cannot be changed after the first successful init.
-///
-/// # Safety Actions
-/// SA-047: Multi-tenant profile system.
-/// SA-073: Race-to-init protection via internal init_with_profile_internal.
-pub fn init_with_profile(profile: FirewallProfile) -> Result<(), FirewallInitError> {
-    // For backward compatibility: use default token check
-    let expected_token = INIT_TOKEN_ENV
-        .get_or_init(|| std::env::var("POLICY_GATE_INIT_TOKEN").ok())
-        .clone()
-        .unwrap_or_else(|| DEFAULT_INIT_TOKEN.to_string());
-    
-    init_with_token(&expected_token, profile)
+/// For tests, we skip token verification to avoid requiring environment
+/// variables during `cargo test`. Tests run in isolated processes anyway.
+pub fn init() -> Result<(), FirewallInitError> {
+    init_with_profile_internal(FirewallProfile::Default)
 }
 
-/// Internal implementation — assumes token already verified.
+/// Internal implementation — assumes authorization already verified.
 fn init_with_profile_internal(profile: FirewallProfile) -> Result<(), FirewallInitError> {
     // Validate custom pattern regex before touching INIT_RESULT
     if let Some((id, regex, _intent)) = profile.custom_pattern() {

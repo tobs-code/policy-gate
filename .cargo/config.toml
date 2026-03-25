@@ -1,0 +1,6 @@
+[env]
+# SA-073: Test-only init token for development and CI
+# This token is ONLY used during `cargo test` and `cargo check` in development.
+# Production builds MUST use a unique token generated at build time:
+#   POLICY_GATE_INIT_TOKEN=$(openssl rand -hex 32) cargo build --release
+POLICY_GATE_INIT_TOKEN = "dev-test-token-not-for-production-123456789012"
