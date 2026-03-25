@@ -1,0 +1,12 @@
+[package]
+name = "firewall-cli"
+version = "0.1.0"
+edition = "2021"
+license.workspace = true
+
+[[bin]]
+name = "firewall-cli"
+path = "src/main.rs"
+
+[dependencies]
+firewall-core = { path = "../firewall-core", default-features = false }

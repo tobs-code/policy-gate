@@ -1,0 +1,48 @@
+[package]
+name = "firewall-core"
+version = "0.1.0"
+edition = "2021"
+license.workspace = true
+
+# Safety requirement SR-SW-07: no unsafe code in the safety function boundary.
+# This is enforced at the crate level, not just per-file.
+
+# SA-009: optional FIPS feature — activates aws-lc-rs for FIPS 140-3 validated
+# SHA-256. Off by default. Enable with: cargo build --features fips
+# Note: aws-lc-rs uses C FFI (unsafe). The sha256_hex() function is in the
+# non-safety audit path and is excluded from #![forbid(unsafe_code)] via
+# a dedicated sub-module when this feature is active.
+[features]
+default = []
+fips = ["dep:aws-lc-rs"]
+semantic = ["dep:ort", "dep:ndarray"]
+
+[dependencies]
+serde = { workspace = true }
+regex = { workspace = true }
+sha2 = { workspace = true }
+hmac = { workspace = true }
+hex = { workspace = true }
+# SA-003: Unicode NFC normalisation
+unicode-normalization = { workspace = true }
+# SA-048: TOML configuration loading
+toml = "0.8"
+# SA-063: Cryptographic RNG for HMAC key generation
+getrandom = "0.2"
+# SA-009: FIPS 140-3 SHA-256 (optional — only when fips feature is enabled)
+aws-lc-rs = { version = "1", optional = true }
+
+# --- Channel D: Semantic Analysis ---
+ort = { version = "2.0.0-rc.3", optional = true }
+ndarray = { version = "0.15", optional = true }
+
+[dev-dependencies]
+# proptest for boundary condition fuzzing (Safety Action SA-005)
+proptest = "1"
+# criterion for statistical benchmarks — normalisation pipeline + evaluation hot path
+criterion = { version = "0.5", features = ["html_reports"] }
+serde_json = "1"
+
+[[bench]]
+name = "normalise"
+harness = false

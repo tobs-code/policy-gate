@@ -1,0 +1,37 @@
+services:
+
+  fuzz-normalise:
+    build:
+      context: ..
+      dockerfile: fuzz/Dockerfile
+    environment:
+      FUZZ_TARGET: fuzz_normalise
+      FUZZ_MAX_TIME: "60"
+    volumes:
+      - ./corpus:/corpus
+      - ./artifacts:/artifacts
+    profiles: ["normalise", "all"]
+
+  fuzz-evaluate-raw:
+    build:
+      context: ..
+      dockerfile: fuzz/Dockerfile
+    environment:
+      FUZZ_TARGET: fuzz_evaluate_raw
+      FUZZ_MAX_TIME: "60"
+    volumes:
+      - ./corpus:/corpus
+      - ./artifacts:/artifacts
+    profiles: ["evaluate", "all"]
+
+  fuzz-channel-a:
+    build:
+      context: ..
+      dockerfile: fuzz/Dockerfile
+    environment:
+      FUZZ_TARGET: fuzz_channel_a
+      FUZZ_MAX_TIME: "60"
+    volumes:
+      - ./corpus:/corpus
+      - ./artifacts:/artifacts
+    profiles: ["channel-a", "all"]

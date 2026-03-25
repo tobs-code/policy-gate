@@ -1,0 +1,15 @@
+node_modules/
+dist/
+native/
+target/
+.ruff_cache/
+__pycache__/
+.venv/
+*.pdb
+simulated_audit.ndjson
+probing_verification.ndjson
+mnt/
+verification/.dataset_cache/
+
+# Local docs / backups
+README-old.md

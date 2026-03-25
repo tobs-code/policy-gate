@@ -1,0 +1,32 @@
+[package]
+name = "firewall-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+license.workspace = true
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+firewall-core = { path = "../firewall-core", default-features = false }
+
+# Fuzz targets are defined as separate binaries
+[[bin]]
+name = "fuzz_normalise"
+path = "fuzz_targets/fuzz_normalise.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_evaluate_raw"
+path = "fuzz_targets/fuzz_evaluate_raw.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_channel_a"
+path = "fuzz_targets/fuzz_channel_a.rs"
+test = false
+doc = false

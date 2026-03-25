@@ -1,0 +1,6 @@
+forbidden_keywords = ["blocked", "ultra-forbidden-keyword"]
+
+[[intents]]
+id = "IP-201"
+intent = "QuestionFactual"
+regex = "(?i)secret password"

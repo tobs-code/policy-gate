@@ -1,0 +1,30 @@
+[workspace]
+members = [
+    "crates/firewall-core",
+    "crates/firewall-napi",
+    "crates/firewall-cli",
+    "crates/firewall-fuzz",
+    "crates/firewall-pyo3",
+    "crates/firewall-wasm",
+]
+resolver = "2"
+
+[workspace.package]
+license = "Apache-2.0"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+# DC-GAP-01: version pinned — regex engine changes could silently alter Channel A pattern matching.
+regex = "=1.12.3"
+sha2 = "=0.10.9"
+hmac = "=0.12.1"
+hex = "0.4"
+# SA-003: Unicode NFKC normalisation — pinned to prevent silent behaviour changes on Unicode version updates (DC-GAP-03).
+unicode-normalization = "=0.1.25"
+
+# Release profile: LTO + single codegen unit for maximum optimisation in the
+# safety-critical path. Relevant for the 50ms watchdog deadline under worst-case
+# 8192-byte Zalgo input (NFKC→NFD→strip Mn→NFC pipeline).
+[profile.release]
+lto = true
+codegen-units = 1
