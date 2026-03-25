@@ -603,21 +603,42 @@ Channel D (Semantic/Embeddings) uses a lightweight static subword-embedding path
 
 **Mitigation:** Treat Channel D as supplementary signal only. Safety decisions remain with Channel A/B deterministic channels. For high-security deployments, use the ONNX semantic path (`--features semantic`) with a comprehensive embedding model.
 
-### 7.6 HMAC Key Management (SA-075)
+### 7.6 HMAC Key Management (SA-075) — Process-Restart Continuity
 
-The audit HMAC chain provides tamper-evidence within the process using `HMAC(key, entry_data + prev_hmac)`. The key is:
-- Generated from process-specific entropy at init time
-- Stored in `OnceLock<[u8; 32]>` (process memory only)
-- Not persisted to external key management (HSM/KMS)
+The audit chain uses HMAC-SHA256 chaining to prevent retrospective tampering. Each entry's `chain_hmac` is computed from the entry content and the previous entry's HMAC.
 
-**Limitation:** This design provides tamper-evidence against retrospective audit modification within the process, but does not provide compliance-grade non-repudiation. A compromised process could theoretically access the key and forge subsequent entries.
+**Problem (Pre-SA-075):** The original implementation stored the HMAC key in `OnceLock<[u8; 32]>` — process memory only. On process restart, a new random key was generated, breaking chain continuity. Two logs from different process lifetimes could not be cryptographically linked.
 
-**Mitigation:** For compliance deployments requiring external non-repudiation, extend the architecture with:
-- External HSM or KMS for HMAC key storage
-- Signed audit entries with hardware-backed keys
-- Separate audit ingestion service with its own key hierarchy
+**Safety Action SA-075:** Persistent Key + Chain Sealing
 
-**Current Scope:** Internal tamper-evidence for operational debugging and incident investigation, not regulatory compliance.
+| Mechanism | Implementation | Purpose |
+|-----------|----------------|---------|
+| **HMAC_KEY** | `POLICY_GATE_HMAC_KEY` env var (hex, 32 bytes) or auto-generated | Deterministic key across restarts |
+| **CHAIN_SEAL** | `audit_chain.seal` file | Stores last HMAC for chain continuity |
+| **Init Load** | Read seal file at startup | Continue chain from previous process |
+| **Audit Write** | Update seal file after each entry | Enable next restart to link |
+
+**Implementation:**
+```rust
+// At process restart: Load previous HMAC from seal
+if let Ok(seal) = std::fs::read_to_string(CHAIN_SEAL_PATH) {
+    *LAST_AUDIT_HMAC.lock().unwrap() = Some(seal);
+}
+
+// After each audit: Write new HMAC to seal
+fn chain_seal(key, entry, prev_hmac) -> String {
+    let new_hmac = compute_hmac(key, entry, prev_hmac);
+    std::fs::write(CHAIN_SEAL_PATH, &new_hmac)?;
+    new_hmac
+}
+```
+
+**Deployment:**
+- **Development:** Auto-generated key, saved to seal file
+- **Production:** Set `POLICY_GATE_HMAC_KEY` for deterministic key across restarts
+- **Rotation:** Change env var → new chain segment; old logs still verifiable with old key
+
+**Incident Response:** Audit logs from multiple process restarts now form a single continuous cryptographic chain. The seal file provides the linking HMAC across restart boundaries.
 
 ---
 

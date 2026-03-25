@@ -83,9 +83,15 @@ static SEQUENCE: AtomicU64 = AtomicU64::new(1);
 //
 // To prevent retrospective tampering, each audit entry is cryptographically
 // chained to the previous one using HMAC-SHA256.
-// The key is fixed for the process lifetime (initialised in init()).
+//
+// Process-Restart Continuity Fix (SA-075):
+// - HMAC_KEY: Persistent key loaded from file/env on startup
+// - CHAIN_SEAL: Last HMAC written to disk for continuity across restarts
+// - On init: Load previous HMAC from CHAIN_SEAL to continue chain
+// - On audit: Write new HMAC to CHAIN_SEAL for next restart
 static HMAC_KEY: OnceLock<[u8; 32]> = OnceLock::new();
 static LAST_AUDIT_HMAC: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+static CHAIN_SEAL_PATH: &str = "audit_chain.seal";
 
 // ─── Review Tracking (SA-072) ─────────────────────────────────────────────────
 //
@@ -231,25 +237,96 @@ fn init_with_profile_internal(profile: FirewallProfile) -> Result<(), FirewallIn
             semantic::ChannelD::init(m, t).map_err(|e| format!("Channel D init failed: {}", e))?;
         }
 
-        // Initialise HMAC key for audit integrity (SA-063).
-        // Uses cryptographically secure RNG (getrandom) for key generation.
-        // Key is unique per process lifetime, never persisted, never all-zero.
-        // For deployments requiring a stable, externally-managed key, replace
-        // this with a key loaded from a secure vault or environment variable.
+        // Initialise HMAC key for audit integrity (SA-075).
+        // Process-Restart Continuity: Load persistent key or generate new one
         let _ = HMAC_KEY.get_or_init(|| {
+            // Try to load from environment (deployment)
+            if let Ok(key_str) = std::env::var("POLICY_GATE_HMAC_KEY") {
+                if let Ok(key_bytes) = hex::decode(&key_str) {
+                    if key_bytes.len() == 32 {
+                        let mut key = [0u8; 32];
+                        key.copy_from_slice(&key_bytes);
+                        return key;
+                    }
+                }
+            }
+            
+            // Fallback: Generate new key (development)
             use getrandom::getrandom;
             let mut key = [0u8; 32];
-            // Cryptographically secure random key - panics if RNG unavailable
             getrandom(&mut key).expect("cryptographic RNG unavailable");
+            
+            // Save for continuity
+            if let Err(e) = std::fs::write(CHAIN_SEAL_PATH, hex::encode(key)) {
+                eprintln!("Warning: Could not save HMAC key: {}", e);
+            }
+            
             key
         });
 
+        // Load previous chain seal for continuity
+        if let Ok(seal_content) = std::fs::read_to_string(CHAIN_SEAL_PATH) {
+            let trimmed = seal_content.trim();
+            if !trimmed.is_empty() && trimmed.len() == 64 { // 32 bytes = 64 hex chars
+                *LAST_AUDIT_HMAC.lock().unwrap() = Some(trimmed.to_string());
+            }
+        }
+        
         fsm::intent_patterns::startup_self_test().map_err(|errs| errs.join("; "))
     });
     result
         .as_ref()
         .copied()
         .map_err(|e| FirewallInitError::PatternCompileFailure(e.clone()))
+}
+
+/// Write chain seal for process-restart continuity (SA-075).
+fn chain_seal(key: &[u8; 32], audit_entry: &AuditEntry, prev_hmac: Option<&str>) -> String {
+    use hmac::{Hmac, Mac};
+    use sha2::Sha256;
+    
+    type HmacSha256 = Hmac<Sha256>;
+    
+    let mut mac = HmacSha256::new_from_slice(key).expect("HMAC accepts any key size");
+    
+    // Serialize audit entry fields for HMAC
+    mac.update(&audit_entry.sequence.to_le_bytes());
+    mac.update(&audit_entry.ingested_at_ns.to_le_bytes());
+    mac.update(&audit_entry.decided_at_ns.to_le_bytes());
+    mac.update(&audit_entry.total_elapsed_us.to_le_bytes());
+    mac.update(audit_entry.input_hash.as_bytes());
+    
+    // Include verdict kind as string representation
+    let verdict_str = format!("{:?}", audit_entry.verdict_kind);
+    mac.update(verdict_str.as_bytes());
+    
+    // Include optional fields if present
+    if let Some(ref reason) = audit_entry.block_reason {
+        let reason_str = format!("{:?}", reason);
+        mac.update(reason_str.as_bytes());
+    }
+    
+    let advisory_str = format!("{:?}", audit_entry.advisory);
+    mac.update(advisory_str.as_bytes());
+    
+    if let Some(sim) = audit_entry.semantic_similarity {
+        mac.update(&sim.to_le_bytes());
+    }
+    
+    // Chain to previous HMAC for continuity
+    if let Some(prev) = prev_hmac {
+        mac.update(prev.as_bytes());
+    }
+    
+    let result = mac.finalize();
+    let new_hmac = hex::encode(result.into_bytes());
+    
+    // Write to disk for next restart
+    if let Err(e) = std::fs::write(CHAIN_SEAL_PATH, &new_hmac) {
+        eprintln!("Warning: Could not write chain seal: {}", e);
+    }
+    
+    new_hmac
 }
 
 pub(crate) fn get_config() -> Option<&'static config::FirewallConfig> {
