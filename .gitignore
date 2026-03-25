@@ -15,4 +15,5 @@ fuzz/corpus/
 # Local docs / backups
 README-old.md
 plans/
+firewall.toml
 

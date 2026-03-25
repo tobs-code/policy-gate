@@ -349,8 +349,6 @@ It is a weaker fit when you want:
 - [SAFETY_MANUAL.md](./SAFETY_MANUAL.md)
 - [deployment.md](./deployment.md)
 - [RED_TEAM.md](./RED_TEAM.md)
-- [NEXT_STEPS.md](./NEXT_STEPS.md)
-- [README-old.md](./README-old.md)
 
 ## License
 
