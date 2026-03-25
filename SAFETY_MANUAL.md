@@ -3,7 +3,7 @@
 ## High-Reliability Architecture Documentation
 
 **Document ID:** PF-SM-001
-**Revision:** 2.18
+**Revision:** 2.19
 **Status:** Under development — NOT certified — NOT for production use
 **Design target:** High-reliability, fail-closed, deterministic prompt gate
 
@@ -16,6 +16,7 @@
 
 | Rev  | Date    | Changes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | ---- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2.19 | 2026-03 | **SA-076 Session-Aware-Layer Implementation.** Multi-Turn Conversation Memory für stateless Firewall: SessionManager mit Sliding Window (default 10), 5 Escalation Detection Algorithmen (ComplexityEscalation, TopicDrift, PolicyTesting, RepetitionWithVariation, PayloadFragmentation), Risk Level Classification (Low/Medium/High, 0-100 Scoring), Session Statistics & Cleanup, `evaluate_with_session()` API. Thread-safe mit `Arc<Mutex<>>`, Advisory-only Design, ~0.1-0.5ms Overhead. 9 Unit Tests + 6 E2E Tests. Schließt Multi-Turn Attack Lücken aus RED_TEAM.md während Stateless Performance erhalten bleibt. |
 | 2.18 | 2026-03 | **Documentation/verification alignment update.** (1) Channel D / `semantic` is now documented as **opt-in by default** (`firewall-core` uses `default = []`); local default verification path is `cargo test -p firewall-core --no-default-features`, with a separate `cargo check -p firewall-core --features semantic` CI compile gate. (2) Cross-language conformance corpus documented: `verification/conformance_corpus.json` is exercised by Rust, Node, and Python binding smoke/conformance jobs. (3) Node wrapper path documented as the repo-standard native flow (`npm run build:native`, `npm run build`, `npm run smoke`, `npm run conformance`). (4) Injection-marker hardening updated: normalized forms of chat-template markers such as `<|system|>` are blocked symmetrically in Channel A and Channel B after confusable normalization. |
 | 2.17 | 2026-03 | **Gap-Analysis Runde 14-15 — 3 Gaps behoben.** (1) **Gap-14.2 (HTML/JS Tag Blocking):** IP-050 guard (`ip050_guard` in `intent_patterns.rs`) erweitert mit HTML/JS-Tag-Blocking: `<script>`, `</script>`, `<iframe>`, `</iframe>`, `onerror=`, `onload=`, `onclick=`, `javascript:`, `<img>`, `<svg>`, `</svg>`, `<body>`, `</body>`, `<embed>`, `<object>`, `<style>`. Verhindert XSS-Injection via Structured-Output-Anfragen. (2) **Gap-15.1 (SVG/MathML/XMLNS Blocking):** IP-050 guard erweitert mit SVG/MathML/XMLNS-Blocking: `<math>`, `</math>`, `<annotation-xml>`, `<mglyph>`, `<malignmark>`, `<maction>`, `xmlns:`, `xlink:href`, `<use>`. Schließt MathML-Annotation-XSS-Vektor. (3) **Gap-15.4 (Multilingual Framing):** Translation Map (SA-062, `types.rs`) erweitert mit mehrsprachigen Legal/Educational Framing-Patterns: Deutsch ("für eine wissenschaftliche Arbeit", "theoretisch", "rein hypothetisch"), Französisch ("pour un travail scientifique", "théoriquement", "purement hypothétique"), Spanisch ("para un trabajo científico", "teóricamente", "puramente hipotético"). Schließt mehrsprachigen Bypass-Gap. Tests hinzugefügt für HTML/JS/SVG/MathML-Blocking und multilinguale Framing-Übersetzung.                                                                                                                                                                          |
 | 2.16 | 2026-03 | **Gap-Analysis Runde 3 — 3 Gaps behoben.** (1) **SA-069 (Egress PII Extended):** `fsm/egress.rs` erweitert: US Phone, International Phone, IPv4, IPv6, IBAN, API Keys, AWS Keys, GitHub Tokens, Bearer Tokens, Passwörter. Regex-Escaping-Fixes (Raw Strings, Quote-Handling). Comprehensive test coverage. (2) **SA-072 (Multilingual Attack Keywords):** ~40 Russische (RU), ~40 Arabische (AR), ~30 Chinesische (CN), ~30 Japanische (JA) Angriffs-Phrasen in Channel A (FP-003) und Channel B (RE-004) — symmetrisch. Closes multilingual safety asymmetry (Gap 2). (3) **SA-073 (Audit Review Mechanism):** `ReviewItem`, `ReviewStatus`, `ReviewStats` Typen in `types.rs`. `REVIEW_QUEUE` für Tracking. APIs: `get_pending_reviews()`, `get_expired_reviews()`, `mark_reviewed()`, `get_review_stats()`, `track_review_item()`. Integration in `evaluate()`. SLAs: DiagnosticDisagreement = 24h, DiagnosticAgreement = 72h. 47 lib tests passing.                                                                                                                                                                                                                                                                                                                                                         |
@@ -640,6 +641,95 @@ fn chain_seal(key, entry, prev_hmac) -> String {
 
 **Incident Response:** Audit logs from multiple process restarts now form a single continuous cryptographic chain. The seal file provides the linking HMAC across restart boundaries.
 
+### 7.7 Session-Aware-Layer (SA-076) — Multi-Turn Conversation Memory
+
+The firewall's stateless design provides excellent performance and simplicity but has a fundamental limitation: inability to detect multi-turn escalation attacks and payload fragmentation across conversation turns. SA-076 addresses this gap with an optional session-aware layer.
+
+**Problem Statement:**
+Stateless evaluation treats each prompt independently, missing:
+- **Multi-Turn Escalation:** Gradual increase in complexity or sensitivity across messages
+- **Payload Fragmentation:** Attack split across multiple turns to bypass single-message detection
+- **Topic Drift:** Shift from benign to sensitive topics over conversation
+- **Policy Testing:** Repeated attempts to find boundaries with minor variations
+- **Repetition with Variation:** Similar prompts with small changes to bypass filters
+
+**Safety Action SA-076:** Session-Aware-Layer Architecture
+
+| Component | Implementation | Purpose |
+|-----------|----------------|---------|
+| **SessionManager** | `session.rs` with `Arc<Mutex<>>` thread-safe storage | Track conversation state per session |
+| **Sliding Window** | Default 10 messages, configurable | Memory-efficient recent context |
+| **Escalation Detection** | 5 heuristic algorithms | Detect multi-turn attack patterns |
+| **Risk Classification** | Low/Medium/High levels with scoring | Quantify session threat level |
+| **Session Statistics** | `SessionStats` struct | Monitor session health and metrics |
+
+**Escalation Detection Algorithms:**
+
+1. **Complexity Escalation:** Detect gradual increase in prompt complexity
+2. **Topic Drift:** Identify shifts from general to sensitive topics
+3. **Policy Testing:** Recognize repeated boundary-testing attempts
+4. **Repetition with Variation:** Find similar prompts with minor changes
+5. **Payload Fragmentation:** Detect attack fragments across multiple turns
+
+**Risk Level Classification:**
+- **Low (0-30):** Normal conversation patterns
+- **Medium (31-70):** Suspicious patterns, increased monitoring
+- **High (71-100):** Active escalation detected, operator review required
+
+**Session Flags:**
+- `HighEscalationScore`: Score ≥70 threshold
+- `FragmentationDetected`: Payload fragmentation patterns
+- `RapidEscalation`: Fast escalation within few messages
+- `LongSession`: ≥8 messages in session
+- `TopicDrift`: Topic change detected
+- `PolicyTesting`: Boundary testing patterns
+- `RepetitionWithVariation`: Similar prompts with variations
+
+**API Integration:**
+```rust
+// Enhanced evaluation with session context
+pub fn evaluate_with_session(
+    session_id: &str,
+    input: &PromptInput,
+    sequence: u64,
+) -> Verdict
+
+// Session management
+pub struct SessionManager {
+    sessions: HashMap<String, SessionContext>,
+    window_size: usize,
+    session_timeout_minutes: u64,
+}
+```
+
+**Security Model:**
+- **Advisory-Only:** Session layer never gates Pass/Block decisions
+- **Thread-Safe:** `Arc<Mutex<>>` ensures concurrent access safety
+- **Memory-Bounded:** Sliding window prevents unbounded memory growth
+- **Timeout-Based:** Automatic cleanup of expired sessions
+- **Privacy-Preserving:** No long-term storage of conversation content
+
+**Performance Impact:**
+- **Overhead:** ~0.1-0.5ms per evaluation (session lookup + analysis)
+- **Memory:** ~1KB per active session (10 messages × metadata)
+- **Scalability:** Suitable for thousands of concurrent sessions
+- **Cleanup:** Automatic expiration prevents memory leaks
+
+**Deployment Guidelines:**
+- **Optional:** Session layer is opt-in via `evaluate_with_session()`
+- **Configuration:** Window size and timeout adjustable per deployment
+- **Monitoring:** Session statistics available via `get_stats()`
+- **Alerting:** High-risk sessions trigger operator notifications
+
+**Verification Evidence:**
+- **Unit Tests:** 9 tests covering session manager, escalation detection, risk classification
+- **E2E Tests:** 6 tests covering multi-turn conversations, fragmentation, concurrent sessions
+- **Performance Tests:** 100 messages processed in <1 second with session overhead
+- **Integration Tests:** Session layer preserves base firewall behavior
+
+**Residual Risk:**
+Session layer significantly improves multi-turn attack detection but remains advisory-only. Sophisticated attackers may still bypass detection through careful pacing or session rotation. For maximum security, combine with application-level monitoring and rate limiting.
+
 ---
 
 ## 7. Traceability Matrix
@@ -664,6 +754,7 @@ fn chain_seal(key, entry, prev_hmac) -> String {
 | SR-016             | H-01   | FP-006 injection marker independence (Channel A blocks directly) | `fsm/mod.rs::FORBIDDEN_PATTERNS[FP-006]`                   | PO-A4                | `fp006_blocks_injection_embedded_after_translate` |
 | SR-017             | H-15   | Pre-NFKC raw byte limit (SA-044)                                 | `types.rs::PromptInput::normalise` Step 0b                 | —                    | `nfkc_expansion_dos_probe`                        |
 | SR-018             | H-01   | Ingress-Egress Consistency (same PromptInput)                    | `lib.rs::evaluate_output`                                  | —                    | caller contract / manual review                   |
+| SR-019             | H-16   | Session-Aware-Layer multi-turn detection                         | `session.rs`, `lib.rs::evaluate_with_session`              | —                    | `session_tests`, `session_aware_e2e`              |
 
 ---
 

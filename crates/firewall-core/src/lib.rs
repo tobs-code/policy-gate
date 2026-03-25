@@ -22,10 +22,15 @@ pub mod semantic;
 pub mod profile;
 // SA-048: TOML configuration loading — extensions to allowlist/keywords.
 mod config;
+// SA-076: Session-Aware-Layer for Multi-Turn Conversation Memory.
+pub mod session;
 
 pub use advisory::{AdvisoryEvent, AdvisoryOpinion, ChannelC};
 pub use profile::FirewallProfile;
 pub use types::*;
+
+// SA-076: Session-Aware-Layer exports
+pub use session::{SessionManager, SessionAnalysis, SessionRiskLevel, evaluate_with_session};
 
 use fsm::ChannelA;
 use rule_engine::ChannelB;
@@ -271,6 +276,9 @@ fn init_with_profile_internal(profile: FirewallProfile) -> Result<(), FirewallIn
                 *LAST_AUDIT_HMAC.lock().unwrap() = Some(trimmed.to_string());
             }
         }
+        
+        // SA-076: Initialize Session-Aware-Layer for Multi-Turn Conversation Memory
+        session::init_session_manager();
         
         fsm::intent_patterns::startup_self_test().map_err(|errs| errs.join("; "))
     });

@@ -20,6 +20,7 @@ It is designed for teams that want predictable enforcement, auditable decisions,
 - fail-closed behavior on ambiguity, disagreement, or fault
 - auditable PASS/BLOCK outcomes
 - advisory heuristics and semantic analysis kept outside the safety path
+- **session-aware multi-turn conversation memory** for detecting escalation attacks
 - Rust core with Node, Python, and WASM targets
 
 ## Why this project exists
@@ -32,6 +33,7 @@ Most AI guardrails are probabilistic classifiers. They can be useful, but they a
 - block unknown or ambiguous requests by default
 - keep the safety path deterministic
 - treat AI-assisted analysis as advisory, not authoritative
+- **detect multi-turn escalation attacks** through session memory
 - produce audit records for every decision
 
 The core idea is simple: for some systems, it is better to make unsafe requests unrepresentable than to estimate whether they look risky.
@@ -46,6 +48,7 @@ Examples:
 - enforcing tenant- or profile-specific prompt policies
 - validating model output for prompt leakage, credential leakage, or PII
 - creating a reviewable PASS/BLOCK layer in front of LLM APIs
+- **detecting multi-turn escalation attacks** with session memory
 
 ## Quick example
 
@@ -67,6 +70,36 @@ if (!verdict.isPass) {
 }
 
 // safe to forward to the model
+```
+
+### Session-Aware Evaluation
+
+```ts
+import { Firewall } from "policy-gate";
+
+const firewall = await Firewall.create({
+  onAudit: async (entry) => {
+    await db.audit.insert(entry);
+  },
+});
+
+// Session-aware evaluation for multi-turn conversations
+const sessionId = "user-123";
+const verdict = await firewall.evaluateWithSession(
+  sessionId,
+  "How can I bypass security restrictions?"
+);
+
+if (!verdict.isPass) {
+  console.log(`Blocked: ${verdict.blockReason}`);
+  console.log(`Session risk: ${verdict.sessionAnalysis?.riskLevel}`);
+  console.log(`Escalation score: ${verdict.sessionAnalysis?.escalationScore}`);
+}
+
+// Session statistics
+const stats = firewall.getSessionStats();
+console.log(`Active sessions: ${stats.activeSessions}`);
+console.log(`High-risk sessions: ${stats.highRiskSessions}`);
 ```
 
 ### Python
@@ -330,6 +363,7 @@ The codebase contains explicit hardening work for areas such as:
 - watchdog behavior and fail-closed fault handling
 - leakage and PII-like output validation
 - audit integrity via chained HMAC-based records
+- **session-aware multi-turn escalation detection** with sliding window memory
 
 For the full design history and safety action log, see [SAFETY_MANUAL.md](./SAFETY_MANUAL.md).
 
@@ -351,6 +385,7 @@ Use it when you want:
 - deterministic PASS/BLOCK behavior
 - auditable decisions and review workflows
 - a defense-oriented wrapper around tool-using agents
+- **multi-turn conversation protection** against escalation attacks
 
 It is a weaker fit when you want:
 
