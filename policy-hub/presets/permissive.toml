@@ -1,0 +1,74 @@
+# Permissive Preset - Permissive Grundeinstellungen
+# Mehr Freiheiten für weniger kritische Anwendungsfälle
+
+# ─── Context Window ─────────────────────────────────────────────────────────────
+# Höheres Context Window für mehr Flexibilität
+
+context_window = 5
+
+# ─── Erlaubte Intents ───────────────────────────────────────────────────────────
+# Alle grundlegenden Intents erlaubt
+
+[allowed_intents]
+# Fragen - alle Typen
+QuestionFactual = true
+QuestionCausal = true
+QuestionComparative = true
+
+# Aufgaben - alle Typen
+TaskCodeGeneration = true
+TaskTextSummarisation = true
+TaskDataExtraction = true
+TaskTranslation = true
+
+# Konversation - alle Typen
+ConversationalGreeting = true
+ConversationalAcknowledgement = true
+
+# Erweiterte Intents
+StructuredOutput = true
+ControlledCreative = true
+SystemMetaQuery = true
+
+# ─── Minimale Verbote ───────────────────────────────────────────────────────────
+# Nur wirklich gefährliche Aktionen blockiert
+
+[blocked_intents]
+# (Keine - bei Bedarf hier hinzufügen)
+
+# ─── Erlaubte Aktionen ──────────────────────────────────────────────────────────
+
+[additional_restrictions]
+allow_external_links = true
+allow_file_downloads = true
+allow_external_resources = true
+allow_internal_only = false
+allow_system_commands = true
+allow_db_queries = true
+allow_shell_execution = true
+
+# ─── Minimaler PII-Schutz ───────────────────────────────────────────────────────
+
+[pii_protection]
+enabled = false
+prevent_pii_exposure = false
+auto_anonymize = false
+
+# ─── Minimale Egress-Kontrollen ────────────────────────────────────────────────
+
+[egress_control]
+prevent_pii_leakage = false
+prevent_credential_leakage = false
+prevent_api_key_exposure = false
+prevent_internal_info_leakage = false
+prevent_external_links = false
+prevent_confidential_data_leakage = false
+
+# ─── Zusätzliche Konfiguration ──────────────────────────────────────────────────
+
+[metadata]
+name = "permissive"
+description = "Permissives Profil mit maximaler Flexibilität - nur für nicht-kritische Anwendungsfälle"
+version = "1.0.0"
+preset = true
+author = "policy-gate"

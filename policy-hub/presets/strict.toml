@@ -1,0 +1,68 @@
+# Strict Preset - Strikte Grundeinstellungen
+# Maximale Sicherheit mit minimalen erlaubten Aktionen
+
+# ─── Context Window ─────────────────────────────────────────────────────────────
+# Minimales Context Window für maximale Kontrolle
+
+context_window = 1
+
+# ─── Erlaubte Intents ───────────────────────────────────────────────────────────
+# Nur absolut sichere, grundlegende Intents
+
+[allowed_intents]
+# Nur einfache Faktenfragen erlaubt
+ConversationalGreeting = true
+
+# ─── Verbotene Intents ───────────────────────────────────────────────────────────
+# Alle anderen Intents blockiert
+
+[blocked_intents]
+QuestionFactual = true
+QuestionCausal = true
+QuestionComparative = true
+TaskCodeGeneration = true
+TaskTextSummarisation = true
+TaskDataExtraction = true
+TaskTranslation = true
+ConversationalGreeting = true
+ConversationalAcknowledgement = true
+StructuredOutput = true
+ControlledCreative = true
+SystemMetaQuery = true
+
+# ─── Maximale Einschränkungen ───────────────────────────────────────────────────
+
+[additional_restrictions]
+allow_external_links = false
+allow_file_downloads = false
+allow_external_resources = false
+allow_internal_only = true
+allow_system_commands = false
+allow_db_queries = false
+allow_shell_execution = false
+
+# ─── PII-Schutz ─────────────────────────────────────────────────────────────────
+
+[pii_protection]
+enabled = true
+prevent_pii_exposure = true
+auto_anonymize = true
+
+# ─── Egress-Kontrollen ──────────────────────────────────────────────────────────
+
+[egress_control]
+prevent_pii_leakage = true
+prevent_credential_leakage = true
+prevent_api_key_exposure = true
+prevent_internal_info_leakage = true
+prevent_external_links = true
+prevent_confidential_data_leakage = true
+
+# ─── Zusätzliche Konfiguration ──────────────────────────────────────────────────
+
+[metadata]
+name = "strict"
+description = "Strengstes Profil mit maximaler Sicherheit und minimalen erlaubten Aktionen"
+version = "1.0.0"
+preset = true
+author = "policy-gate"

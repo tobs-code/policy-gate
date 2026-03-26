@@ -1,6 +1,6 @@
 # policy-gate
 
-[![CI](https://github.com/tobs-code/policy-gate/actions/workflows/ci.yml/badge.svg)](https://github.com/tobs-code/policy-gate/actions)
+[![CI](https://github.com/tobs-code/policy-gate/.github/workflows/ci.yml/badge.svg)](https://github.com/tobs-code/policy-gate/actions)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org)
 [![Safety](https://img.shields.io/badge/safety-experimental-yellow.svg)](SAFETY_MANUAL.md)
@@ -385,6 +385,21 @@ The project supports:
 - TOML-based configuration via [firewall.example.toml](./firewall.example.toml)
 
 The design is multi-tenant at the policy layer and single-tenant at the safety decision core.
+
+### Policy-Hub - Fertige TOML-Profile
+
+Das Projekt enthält einen Policy-Hub mit vorkonfigurierten Profilen für typische Use-Cases:
+
+**Profile:**
+- [`policy-hub/profiles/research-agent/firewall.toml`](policy-hub/profiles/research-agent/firewall.toml) - Für Research-Agenten mit erweiterten Egress-Kontrollen
+- [`policy-hub/profiles/code-assistant/firewall.toml`](policy-hub/profiles/code-assistant/firewall.toml) - Für Code-Assistenten mit Code-spezifischen Regeln
+- [`policy-hub/profiles/customer-support/firewall.toml`](policy-hub/profiles/customer-support/firewall.toml) - Für Kundenservice mit PII-Schutz
+
+**Presets:**
+- [`policy-hub/presets/strict.toml`](policy-hub/presets/strict.toml) - Maximal restriktiv
+- [`policy-hub/presets/permissive.toml`](policy-hub/presets/permissive.toml) - Minimal restriktiv
+
+Detaillierte Dokumentation: [`policy-hub/README.md`](policy-hub/README.md)
 
 ## Verification and testing
 
