@@ -11,6 +11,7 @@
 
 use super::RuleOutcome;
 use crate::types::{BlockReason, MatchedIntent};
+use base64::{prelude::BASE64_STANDARD, Engine};
 
 pub struct Rule {
     #[allow(dead_code)]
@@ -42,10 +43,12 @@ fn contains_any_ci_fuzzy(s: &str, keywords: &[&str]) -> bool {
     // Example: "mal,ware" -> "malware" matches "malware".
     let lower_s = s.to_lowercase();
     let stripped_s: String = lower_s.chars().filter(|c| c.is_alphanumeric()).collect();
+    let leet_s: String = stripped_s.chars().map(leet_to_ascii_internal).collect();
 
     keywords.iter().any(|&kw| {
         let lower_kw = kw.to_lowercase();
         let stripped_kw: String = lower_kw.chars().filter(|c| c.is_alphanumeric()).collect();
+        let leet_kw: String = stripped_kw.chars().map(leet_to_ascii_internal).collect();
 
         // Literal check first (preserved for phrases with spaces)
         if lower_s.contains(&lower_kw) {
@@ -54,7 +57,7 @@ fn contains_any_ci_fuzzy(s: &str, keywords: &[&str]) -> bool {
 
         // Fuzzy check only if the stripped keyword is significant (> 2 chars)
         // to avoid single-letter collisions like "<s>" -> "s".
-        if stripped_kw.len() > 2 && stripped_s.contains(&stripped_kw) {
+        if stripped_kw.len() > 2 && (stripped_s.contains(&stripped_kw) || leet_s.contains(&leet_kw)) {
             return true;
         }
 
@@ -62,9 +65,114 @@ fn contains_any_ci_fuzzy(s: &str, keywords: &[&str]) -> bool {
     })
 }
 
+fn leet_to_ascii_internal(c: char) -> char {
+    match c {
+        '0' => 'o',
+        '1' => 'i',
+        '2' => 'z',
+        '3' => 'e',
+        '4' => 'a',
+        '5' => 's',
+        '6' => 'g',
+        '7' => 't',
+        '8' => 'b',
+        '9' => 'g',
+        _ => c,
+    }
+}
+
 fn ends_with_question_mark(s: &str) -> bool {
     s.trim_end().ends_with('?')
 }
+
+fn contains_encoded_payload(s: &str) -> bool {
+    // Check for potential Base64/Hex strings.
+    // We look for sequences of characters that could be encoded payloads.
+    // Instead of just splitting by whitespace, we also consider punctuation.
+    let tokens = s.split(|c: char| c.is_whitespace() || c == '"' || c == '\'' || c == '(' || c == ')' || c == '[' || c == ']' || c == '{' || c == '}');
+
+    for token in tokens {
+        // Strip trailing punctuation often found in prompts
+        let clean_word = token.trim_end_matches(|c: char| c == '?' || c == '!' || c == '.' || c == ',' || c == ':' || c == ';');
+        
+        if clean_word.len() < 4 {
+            continue;
+        }
+
+        // Base64 heuristic
+        if clean_word.len() > 8 && clean_word.chars().all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '=') {
+            let decoded = BASE64_STANDARD.decode(clean_word)
+                .or_else(|_| {
+                    use base64::engine::general_purpose::STANDARD_NO_PAD;
+                    STANDARD_NO_PAD.decode(clean_word.trim_end_matches('='))
+                });
+
+            if let Ok(decoded) = decoded {
+                if let Ok(decoded_str) = String::from_utf8(decoded) {
+                    let lower_decoded = decoded_str.to_lowercase();
+                    if PAYLOAD_NOUNS_INTERNAL.iter().any(|&kw| lower_decoded.contains(kw))
+                        || SENSITIVE_TARGETS_INTERNAL.iter().any(|&kw| lower_decoded.contains(kw))
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        // Hex heuristic (e.g. \x61\x70\x69)
+        if clean_word.contains("\\x") || clean_word.contains("0x") {
+            let stripped: String = clean_word
+                .replace("\\x", "")
+                .replace("0x", "")
+                .chars()
+                .filter(|c| c.is_ascii_hexdigit())
+                .collect();
+            if stripped.len() >= 4 && stripped.len() % 2 == 0 {
+                if let Ok(decoded) = hex::decode(&stripped) {
+                    if let Ok(decoded_str) = String::from_utf8(decoded) {
+                        let lower_decoded = decoded_str.to_lowercase();
+                        if PAYLOAD_NOUNS_INTERNAL.iter().any(|&kw| lower_decoded.contains(kw))
+                            || SENSITIVE_TARGETS_INTERNAL.iter().any(|&kw| lower_decoded.contains(kw))
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
+// Internal copies of keywords for helper use (RE-004/RE-005 equivalents)
+const PAYLOAD_NOUNS_INTERNAL: &[&str] = &[
+    "malware",
+    "ransomware",
+    "keylogger",
+    "rootkit",
+    "backdoor",
+    "shellcode",
+    "exfiltrate",
+    "api key",
+    "api-key",
+    "apikey",
+    "aplkey",
+    "password",
+    "credential",
+];
+const SENSITIVE_TARGETS_INTERNAL: &[&str] = &[
+    "/etc/passwd",
+    "/etc/shadow",
+    "id_rsa",
+    "aws_secret",
+    "api key",
+    "api-key",
+    "apikey",
+    "aplkey",
+    "169.254.169.254",
+    "metadata/v1",
+    "kube-system",
+];
 
 // ─── Rule Table ───────────────────────────────────────────────────────────────
 //
@@ -284,6 +392,8 @@ pub static RULE_TABLE: &[Rule] = &[
                 "dump memory",
                 "dumps memory",
                 "process memory dump",
+                "dd if",
+                "dd of",
                 "log4shell",
                 "log4j exploit",
                 "logashell",
@@ -563,6 +673,24 @@ pub static RULE_TABLE: &[Rule] = &[
                 "schadhaft",
                 "schadlich",
                 "schädlich",
+                "passwort stehlen",
+                "passwort abgreifen",
+                "zugangsdaten stehlen",
+                "zugangsdaten abgreifen",
+                "api-schlussel stehlen",
+                "api-schluessel stehlen",
+                "api-schl?ssel stehlen",
+                "identitat klauen",
+                "identitaet klauen",
+                "konto hacken",
+                "account hacken",
+                "daten exfiltrieren",
+                "rechner übernehmen",
+                "system übernehmen",
+                "fernsteuerung",
+                "backdoor einbauen",
+                "hintertür einbauen",
+                "schadcode ausführen",
                 // ── Français (FR) ────────────────────────────────────────────────
                 "logiciel malveillant",
                 "logiciel malicieux",
@@ -837,6 +965,9 @@ pub static RULE_TABLE: &[Rule] = &[
                 "secret key",
                 "private key",
                 "api key",
+                "api-key",
+                "apikey",
+                "aplkey",
                 "auth token",
                 "bearer token",
                 "database password",
@@ -846,6 +977,44 @@ pub static RULE_TABLE: &[Rule] = &[
                 "connection string",
                 "jdbc:",
                 "mongodb://",
+                "postgresql://",
+                "mysql://",
+                "redis://",
+                // Cloud/Infrastructure targets (Red-Teaming Round 2)
+                "169.254.169.254",
+                "metadata/v1",
+                "metadata/instance",
+                "kube-system",
+                "serviceaccount",
+                "client_secret",
+                "client_id",
+                "clientsecret",
+                "clientid",
+                // Multilingual sensitive targets (SA-066 / Gap 3)
+                "api-schlussel",
+                "api-schluessel",
+                "api-schl?ssel",
+                "api_schlussel",
+                "api_schluessel",
+                "apischlussel",
+                "apischluessel",
+                "geheimschlussel",
+                "geheimschluessel",
+                "privater schlussel",
+                "privater schluessel",
+                "passwort",
+                "benutzer-passwort",
+                "zugangsdaten",
+                "anmeldedaten",
+                "cle api",
+                "cle secrete",
+                "mot de passe",
+                "identifiants",
+                "clave api",
+                "clave secreta",
+                "contrasena",
+                "contrasenna",
+                "credenciales",
             ];
             if contains_any_ci_fuzzy(input, SENSITIVE_TARGETS) {
                 RuleOutcome::Block(BlockReason::ForbiddenPattern {
@@ -946,6 +1115,50 @@ pub static RULE_TABLE: &[Rule] = &[
             {
                 RuleOutcome::Block(BlockReason::MalformedInput {
                     detail: "unicode tag character detected".into(),
+                })
+            } else {
+                RuleOutcome::Continue
+            }
+        },
+    },
+    Rule {
+        id: "RE-009",
+        description: "Block: suspicious script mixing (homoglyph/obfuscation attempt) (SA-029)",
+        // Detects inputs that mix Latin characters with characters from other scripts
+        // (Cyrillic, Greek, etc.) within a single word. This is a primary indicator
+        // of homoglyph bypass attempts (e.g. "pаsswd" with Cyrillic 'а').
+        //
+        // SA-029 | CR-2026-004
+        evaluate: |input| {
+            for word in input.split_whitespace() {
+                // We only care about words containing ASCII letters
+                if word.chars().any(|c| c.is_ascii_alphabetic()) {
+                    // Check if the word contains non-Latin, non-punctuation, non-digit characters
+                    // that are often used for homoglyphs.
+                    let has_latin = word.chars().any(|c| c.is_ascii_alphabetic());
+                    let has_suspicious_non_latin = word.chars().any(|c| {
+                        let cp = c as u32;
+                        // Ranges for Cyrillic and Greek (most common)
+                        (0x0400..=0x04FF).contains(&cp) || (0x0370..=0x03FF).contains(&cp)
+                    });
+
+                    if has_latin && has_suspicious_non_latin {
+                        return RuleOutcome::Block(BlockReason::MalformedInput {
+                            detail: "suspicious script mixing detected (homoglyph attempt)".into(),
+                        });
+                    }
+                }
+            }
+            RuleOutcome::Continue
+        },
+    },
+    Rule {
+        id: "RE-009B",
+        description: "Block: encoded malicious payloads (Base64/Hex obfuscation)",
+        evaluate: |input| {
+            if contains_encoded_payload(input) {
+                RuleOutcome::Block(BlockReason::ForbiddenPattern {
+                    pattern_id: "RE-009B-ENCODED".to_string(),
                 })
             } else {
                 RuleOutcome::Continue
@@ -1445,6 +1658,13 @@ pub static RULE_TABLE: &[Rule] = &[
                     "trojaner",
                     "malware",
                     "schadcode",
+                    "backdoor",
+                    "keylogger",
+                    "api-schlussel",
+                    "api-schluessel",
+                    "api-schl?ssel",
+                    "passwort",
+                    "zugangsdaten",
                 ],
             ) {
                 return RuleOutcome::Continue;
@@ -1484,6 +1704,9 @@ pub static RULE_TABLE: &[Rule] = &[
                     "troyen",
                     "malware",
                     "logiciel malveillant",
+                    "cle api",
+                    "cle secrete",
+                    "mot de passe",
                 ],
             ) {
                 return RuleOutcome::Continue;
@@ -1523,6 +1746,10 @@ pub static RULE_TABLE: &[Rule] = &[
                     "troyano",
                     "malware",
                     "software malicioso",
+                    "clave api",
+                    "clave secreta",
+                    "contrasena",
+                    "contrasenna",
                 ],
             ) {
                 return RuleOutcome::Continue;

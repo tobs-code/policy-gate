@@ -27,6 +27,7 @@ regex = { workspace = true }
 sha2 = { workspace = true }
 hmac = { workspace = true }
 hex = { workspace = true }
+base64 = "0.22"
 # SA-003: Unicode NFC normalisation
 unicode-normalization = { workspace = true }
 # SA-048: TOML configuration loading

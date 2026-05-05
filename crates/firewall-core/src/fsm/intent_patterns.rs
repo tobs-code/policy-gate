@@ -14,6 +14,7 @@ use crate::types::MatchedIntent;
 use regex::Regex;
 use std::borrow::Cow;
 use std::sync::OnceLock;
+use base64::{prelude::BASE64_STANDARD, Engine};
 
 pub struct IntentPattern {
     pub id: Cow<'static, str>,
@@ -188,6 +189,37 @@ fn ip050_guard(input: &str) -> bool {
         "all secret keys",
         "all auth keys",
         "all keys from",
+        // Multilingual sensitive targets (SA-066 / Gap 3)
+        "all api keys",
+        "all secret keys",
+        "all auth keys",
+        "all keys from",
+        // Multilingual sensitive targets (SA-066 / Gap 3)
+        // Keywords are listed in ASCII-normalized form (u/a/o) to match
+        // the normalization pipeline result, and with 'ue/ae/oe' variants.
+        "api-schlussel",
+        "api-schluessel",
+        "api_schlussel",
+        "api_schluessel",
+        "apischlussel",
+        "apischluessel",
+        "geheimschlussel",
+        "geheimschluessel",
+        "privater schlussel",
+        "privater schluessel",
+        "passwort",
+        "benutzer-passwort",
+        "zugangsdaten",
+        "anmeldedaten",
+        "cle api",
+        "cle secrete",
+        "mot de passe",
+        "identifiants",
+        "clave api",
+        "clave secreta",
+        "contrasena",
+        "contrasenna",
+        "credenciales",
         // Prompt injection via schema field names
         "ignore previous",
         "disregard your",
@@ -210,6 +242,15 @@ fn ip060_guard(input: &str) -> bool {
         "mkfs",
         "chown -r",
         "chmod 777",
+        // Destructive OS commands (expanded)
+        "dd ",
+        "shred ",
+        "format ",
+        "mkfs",
+        "fdisk ",
+        "parted ",
+        "wipefs",
+        "shredder",
         // Destructive DB commands
         "drop table",
         "drop database",
@@ -219,14 +260,23 @@ fn ip060_guard(input: &str) -> bool {
         "reverse shell",
         "bind shell",
         "nc -e",
+        "nc.traditional",
+        "ncat -e",
         "bash -i",
+        "python -c",
+        "perl -e",
+        "php -r",
+        "ruby -e",
         // Exfiltration
         "exfiltrat",
         "curl -x",
         "wget ",
+        "scp ",
+        "rsync ",
         // System files
         "/etc/shadow",
         "/etc/passwd",
+        "/etc/sudoers",
         "id_rsa",
         "id_ed25519",
         ".ssh/id",
@@ -241,6 +291,8 @@ fn ip060_guard(input: &str) -> bool {
         "privilege escal",
         "credential stuffing",
         "log4shell",
+        "remote code execution",
+        "rce",
     ];
     !DISQUALIFY.iter().any(|kw| lower.contains(kw))
 }
@@ -334,6 +386,21 @@ fn ip101_guard(input: &str) -> bool {
         "exploit",
         "hacken",
         "eindringen",
+        "api-schlussel",
+        "api-schluessel",
+        "api-schl?ssel",
+        "api-schl",
+        "schlussel",
+        "schluessel",
+        "api_schlussel",
+        "api_schluessel",
+        "geheimschlussel",
+        "geheimschluessel",
+        "passwort",
+        "zugangsdaten",
+        "anmeldedaten",
+        "identitat klauen",
+        "identitaet klauen",
     ];
     !DISQUALIFY.iter().any(|kw| lower.contains(kw))
 }
@@ -386,6 +453,129 @@ fn ip103_guard(input: &str) -> bool {
     !DISQUALIFY.iter().any(|kw| lower.contains(kw))
 }
 
+
+/// Generic sensitivity guard for informational intents (factual/causal questions).
+/// Rejects requests targeting sensitive system resources (SA-066/Gap 3).
+fn sensitivity_guard(input: &str) -> bool {
+    let lower = input.to_lowercase();
+    
+    // Check for encoded payloads first (Diversified from Channel B)
+    if contains_encoded_payload_fsm(input) {
+        return false;
+    }
+
+    const DISQUALIFY: &[&str] = &[
+        // English
+        "api key",
+        "api-key",
+        "apikey",
+        "aplkey",
+        "private key",
+        "secret key",
+        "auth token",
+        "bearer token",
+        "password",
+        "credential",
+        "id_rsa",
+        "id_ed25519",
+        "/etc/passwd",
+        "/etc/shadow",
+        // Cloud/Infrastructure targets (Red-Teaming Round 2)
+        "169.254.169.254",
+        "metadata/v1",
+        "metadata/instance",
+        "kube-system",
+        "serviceaccount",
+        "client_secret",
+        "client_id",
+        "clientsecret",
+        "clientid",
+        // German (DE)
+        "api-schlussel",
+        "api-schluessel",
+        "api-schl?ssel",
+        "geheimschlussel",
+        "geheimschluessel",
+        "passwort",
+        "zugangsdaten",
+        "anmeldedaten",
+        "identitat klauen",
+        "identitaet klauen",
+        // French (FR)
+        "cle api",
+        "cle secrete",
+        "mot de passe",
+        "identifiants",
+        // Spanish (ES)
+        "clave api",
+        "clave secreta",
+        "contrasena",
+        "contrasenna",
+        "credenciales",
+    ];
+
+    // Check for literal and leetspeak (Diversified from Channel B)
+    let leet: String = lower.chars().map(leet_to_ascii_fsm).collect();
+
+    let matches_disallowed = DISQUALIFY.iter().any(|kw| {
+        let kw_lower = kw.to_lowercase();
+        // Check literal
+        if lower.contains(&kw_lower) { return true; }
+        // Check leet (with and without spaces/dashes for robustness)
+        let kw_compact = kw_lower.replace(' ', "").replace('-', "");
+        leet.contains(&kw_lower) || leet.contains(&kw_compact)
+    });
+    
+    !matches_disallowed
+}
+
+fn contains_encoded_payload_fsm(s: &str) -> bool {
+    // Diversified Base64/Hex detection for Channel A
+    // We try to decode the whole string and chunks of it
+    for word in s.split_whitespace() {
+        let clean = word.trim_end_matches(|c: char| !c.is_alphanumeric() && c != '=');
+        if clean.len() > 4 {
+            // Try Base64
+            if let Ok(decoded) = BASE64_STANDARD.decode(clean) {
+                if let Ok(decoded_str) = String::from_utf8(decoded) {
+                    let d_lower = decoded_str.to_lowercase();
+                    if d_lower.contains("api") || d_lower.contains("pass") || d_lower.contains("key") {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    // Also try decoding the entire string after removing spaces
+    let compressed: String = s.chars().filter(|c| c.is_alphanumeric() || *c == '+' || *c == '/' || *c == '=').collect();
+    if compressed.len() > 8 {
+        if let Ok(decoded) = BASE64_STANDARD.decode(&compressed) {
+            if let Ok(decoded_str) = String::from_utf8(decoded) {
+                let d_lower = decoded_str.to_lowercase();
+                if d_lower.contains("api key") || d_lower.contains("passwd") || d_lower.contains("shadow") {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+fn leet_to_ascii_fsm(c: char) -> char {
+    match c {
+        '@' => 'a',
+        '1' => 'i',
+        '3' => 'e',
+        '4' => 'a',
+        '5' => 's',
+        '0' => 'o',
+        '!' => 'i',
+        '7' => 't',
+        '$' => 's',
+        _ => c,
+    }
+}
+
 // ─── Pattern definitions ──────────────────────────────────────────────────────
 
 macro_rules! def_pattern {
@@ -400,11 +590,12 @@ macro_rules! def_pattern_guarded {
     };
 }
 
-def_pattern!(
+def_pattern_guarded!(
     P_IP001,
     "IP-001",
     MatchedIntent::QuestionFactual,
-    r"(?i)\b(what|who|where|when|which|how many|how much|can you explain|could you explain|please explain)\b.{0,200}\?$"
+    r"(?i)\b(what|who|where|when|which|how many|how much|can you explain|could you explain|please explain)\b.{0,200}\?$",
+    sensitivity_guard
 );
 def_pattern!(
     P_IP002,
@@ -516,7 +707,7 @@ def_pattern_guarded!(
     "IP-101",
     MatchedIntent::QuestionFactual,
     r"(?i)\b(was|wer|wo|wann|welch|wie|warum|wieso|weshalb)\b.{0,120}\?",
-    ip101_guard
+    sensitivity_guard
 );
 
 // IP-102: French factual question
@@ -525,7 +716,7 @@ def_pattern_guarded!(
     "IP-102",
     MatchedIntent::QuestionFactual,
     r"(?i)\b(qu[eo]i|qui|ou|quand|quel|quelle|comment|pourquoi)\b.{0,120}\?",
-    ip102_guard
+    sensitivity_guard
 );
 
 // IP-103: Spanish factual question
@@ -534,7 +725,7 @@ def_pattern_guarded!(
     "IP-103",
     MatchedIntent::QuestionFactual,
     r"(?i)\b(qu[eé]|qui[eé]n|d[oó]nde|cu[aá]ndo|cu[aá]l|c[oó]mo|por qu[eé])\b.{0,120}\?",
-    ip103_guard
+    sensitivity_guard
 );
 
 // IP-110: German code generation

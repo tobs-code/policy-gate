@@ -582,6 +582,7 @@ version = "0.1.0"
 dependencies = [
  "aho-corasick",
  "aws-lc-rs",
+ "base64",
  "criterion",
  "getrandom 0.2.17",
  "hex",

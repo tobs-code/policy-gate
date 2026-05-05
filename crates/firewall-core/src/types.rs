@@ -627,20 +627,12 @@ fn confusable_to_ascii(c: char) -> char {
         // blocks on numeric content should review FP-003/RE-004 keyword lists.
         //
         // Full mapping: '0'→'o', '1'→'l', '2'→'z', '3'→'e', '4'→'a', '5'→'s',
-        //               '6'→'g', '7'→'t', '8'→'b', '9'→'g', '@'→'a', '$'→'s', '|'→'l'
-        '0' => 'o',
-        '1' => 'l', // changed from 'i' to 'l' (IP-045: malware, shellcode bypasses '1'->'i')
-        '2' => 'z',
-        '3' => 'e',
-        '4' => 'a',
-        '5' => 's',
-        '7' => 't',
-        '8' => 'b',
-        '9' => 'g',
+        // Full mapping: '@'→'a', '$'→'s', '|'→'l', '!'→'i'
+        // (ASCII digits 0-9 are NOT mapped here to preserve IPs and version numbers)
         '@' => 'a',
         '$' => 's',
         '|' => 'l',
-        '6' => 'g',
+        '!' => 'i',
         'ℰ' => 'E', // U+2130 SCRIPT CAPITAL E
         'ℱ' => 'F', // U+2131 SCRIPT CAPITAL F
         'ℋ' => 'H', // U+210B SCRIPT CAPITAL H

@@ -85,7 +85,14 @@ fn main() {
                 }
                 let verdict = evaluate_raw(prompt.clone(), i as u64);
                 let label = if verdict.is_pass() { "PASS" } else { "BLOCK" };
-                println!("{}\t{:?}\t{}", label, verdict.kind, prompt);
+                if verdict.kind == firewall_core::VerdictKind::DiagnosticDisagreement {
+                    println!(
+                        "{}\t{:?}\tA:{:?} B:{:?}\t{}",
+                        label, verdict.kind, verdict.channel_a.decision, verdict.channel_b.decision, prompt
+                    );
+                } else {
+                    println!("{}\t{:?}\t{}", label, verdict.kind, prompt);
+                }
             }
         }
         Commands::Diff { path_a, path_b } => {

@@ -9,11 +9,11 @@ use std::sync::OnceLock;
 
 /// Result of structured output scanning.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct StructuredScanResult {
     /// Type of sensitive data found
     pub data_type: &'static str,
     /// Field name where it was found
-    #[allow(dead_code)]
     pub field_name: String,
     /// Snippet of the value (truncated for safety)
     #[allow(dead_code)]
@@ -26,22 +26,21 @@ fn compile_pattern(pattern: &str, name: &'static str) -> Option<Regex> {
     match Regex::new(pattern) {
         Ok(re) => Some(re),
         Err(e) => {
-            eprintln!(
-                "[WARN] Failed to compile {} regex pattern: {}. This PII pattern will be skipped.",
-                name, e
-            );
+            eprintln!("[WARN] Failed to compile {} regex pattern: {}. This PII pattern will be skipped.", name, e);
             None
         }
     }
 }
 
 /// Scan JSON output for PII and secrets.
+#[allow(dead_code)]
 pub fn scan_json(text: &str) -> Option<StructuredScanResult> {
     // Extract field name — compiled once via OnceLock (outside loop)
     static FIELD_RE: std::sync::OnceLock<Option<Regex>> = std::sync::OnceLock::new();
-    let field_re_opt =
-        FIELD_RE.get_or_init(|| compile_pattern(r#""([^"]+)"\s*:"#, "JSON field name"));
-
+    let field_re_opt = FIELD_RE.get_or_init(|| {
+        compile_pattern(r#""([^"]+)"\s*:"#, "JSON field name")
+    });
+    
     let field_re = field_re_opt.as_ref()?;
 
     let patterns = JSON_PII_PATTERNS.get_or_init(|| {
@@ -114,8 +113,11 @@ pub fn scan_json(text: &str) -> Option<StructuredScanResult> {
         if let Some(pattern) = pattern_opt {
             if let Some(caps) = pattern.captures(text) {
                 let full_match = caps.get(0)?.as_str();
-                let field_match = field_re.captures(full_match)?.get(1)?.as_str();
-
+                let field_match = field_re
+                    .captures(full_match)?
+                    .get(1)?
+                    .as_str();
+                
                 return Some(StructuredScanResult {
                     data_type: name,
                     field_name: field_match.to_string(),
@@ -128,11 +130,14 @@ pub fn scan_json(text: &str) -> Option<StructuredScanResult> {
 }
 
 /// Scan XML output for PII and secrets.
+#[allow(dead_code)]
 pub fn scan_xml(text: &str) -> Option<StructuredScanResult> {
     // Extract tag name — compiled once via OnceLock (outside loop)
     static TAG_RE: std::sync::OnceLock<Option<Regex>> = std::sync::OnceLock::new();
-    let tag_re_opt = TAG_RE.get_or_init(|| compile_pattern(r#"<([^\s>]+)"#, "XML tag name"));
-
+    let tag_re_opt = TAG_RE.get_or_init(|| {
+        compile_pattern(r#"<([^\s>]+)"#, "XML tag name")
+    });
+    
     let tag_re = tag_re_opt.as_ref()?;
 
     let patterns = XML_PII_PATTERNS.get_or_init(|| {
@@ -184,8 +189,11 @@ pub fn scan_xml(text: &str) -> Option<StructuredScanResult> {
         if let Some(pattern) = pattern_opt {
             if let Some(caps) = pattern.captures(text) {
                 let full_match = caps.get(0)?.as_str();
-                let tag_match = tag_re.captures(full_match)?.get(1)?.as_str();
-
+                let tag_match = tag_re
+                    .captures(full_match)?
+                    .get(1)?
+                    .as_str();
+                
                 return Some(StructuredScanResult {
                     data_type: name,
                     field_name: tag_match.to_string(),
@@ -198,35 +206,34 @@ pub fn scan_xml(text: &str) -> Option<StructuredScanResult> {
 }
 
 /// Detect if text looks like JSON or XML and scan accordingly.
+#[allow(dead_code)]
 pub fn scan_structured_output(text: &str) -> Option<StructuredScanResult> {
     let trimmed = text.trim();
-
+    
     // Quick detection - JSON starts with { or [
     if trimmed.starts_with('{') || trimmed.starts_with('[') {
         return scan_json(text);
     }
-
+    
     // XML detection - starts with < (but not just < alone)
     if trimmed.starts_with('<') && trimmed.len() > 2 {
         // Skip XML declaration if present
         let content = if trimmed.starts_with("<?xml") {
-            trimmed
-                .find("?>")
-                .map(|i| &trimmed[i + 2..])
-                .unwrap_or(trimmed)
+            trimmed.find("?>").map(|i| &trimmed[i + 2..]).unwrap_or(trimmed)
         } else {
             trimmed
         };
-
+        
         // Check if it's actually XML (has a tag)
         if content.trim().starts_with('<') && content.contains('>') {
             return scan_xml(text);
         }
     }
-
+    
     None
 }
 
+#[allow(dead_code)]
 fn truncate_value(s: &str, max_len: usize) -> String {
     if s.len() <= max_len {
         s.to_string()
@@ -235,7 +242,9 @@ fn truncate_value(s: &str, max_len: usize) -> String {
     }
 }
 
+#[allow(dead_code)]
 static JSON_PII_PATTERNS: OnceLock<Vec<(&'static str, Option<Regex>)>> = OnceLock::new();
+#[allow(dead_code)]
 static XML_PII_PATTERNS: OnceLock<Vec<(&'static str, Option<Regex>)>> = OnceLock::new();
 
 #[cfg(test)]

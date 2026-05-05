@@ -1,10 +1,9 @@
 // lib.rs — firewall-wasm: JS/WASM bindings for policy-gate
-#![deny(clippy::all)]
 //
 // Safety Action SA-060: Export high-security firewall to WASM for Edge deployment.
 
-use firewall_core::{evaluate, init, PromptInput};
 use wasm_bindgen::prelude::*;
+use firewall_core::{PromptInput, evaluate, init};
 
 #[wasm_bindgen]
 pub fn init_firewall() -> Result<(), String> {
@@ -18,10 +17,11 @@ pub fn set_wasm_hmac_key(key_hex: String) -> Result<(), String> {
 
 #[wasm_bindgen]
 pub fn evaluate_prompt(text: String, sequence: u64) -> Result<JsValue, String> {
-    let mut input =
-        PromptInput::new(&text).map_err(|e| format!("Normalization failed: {:?}", e))?;
-
+    let mut input = PromptInput::new(&text)
+        .map_err(|e| format!("Normalization failed: {:?}", e))?;
+    
     let verdict = evaluate(&mut input, sequence);
-
-    serde_wasm_bindgen::to_value(&verdict).map_err(|e| format!("Serialization failed: {}", e))
+    
+    serde_wasm_bindgen::to_value(&verdict)
+        .map_err(|e| format!("Serialization failed: {}", e))
 }

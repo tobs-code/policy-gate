@@ -3,7 +3,7 @@
 ## Safety-Oriented Architecture Documentation
 
 **Document ID:** PF-SM-001
-**Revision:** 2.28
+**Revision:** 2.31
 **Status:** Under development — not certified — not for production use
 **Design target:** Deterministic, fail-closed prompt gate for narrow LLM workflows
 
@@ -21,6 +21,7 @@ Recent revisions:
 
 | Rev  | Date    | Current relevance |
 | ---- | ------- | ----------------- |
+| 2.31 | 2026-05 | **Red-Teaming Round 2 Hardening**: Added RE-009B (Encoded payloads detection). Hardened `sensitivity_guard` in Channel A with Base64/Hex decoding and leetspeak mapping. Expanded `SENSITIVE_TARGETS` with Cloud Metadata (169.254.169.254), K8s (kube-system), and Auth secrets. Refined normalisation in `types.rs` to preserve IP addresses by moving leetspeak mapping into the keyword matching layer. |
 | 2.30 | 2026-04 | **Conformance Hardening (Doc↔Code Audit)**: Added H-21 (Tool-Schema Bypass), H-22 (ReDoS DoS), SR-027 (SA-084 ReDoS validation), OC-14 (ReDoS config constraint). Corrected OC-13 byte limit (127→256 bytes, aligned with `STREAM_EGRESS_MAX_PATTERN_BYTES`). Exposed `validate_tools()` in Node NAPI binding (`firewall-napi/src/lib.rs`) and `index.ts`; updated SR-025 traceability to include NAPI. Unified semantic threshold fallback in `orchestrator.rs` (0.60→0.70, consistent with config.rs default and §9 docs). |
 | 2.29 | 2026-04 | **Tool-Schema Validation for AgenticToolUse**: Added `allowed_tools` configuration option for explicit tool whitelisting. New `BlockReason::ToolNotAllowed` variant. Python binding exposes `validate_tools()` API. Supports LangGraph/CrewAI agent protection. New Safety Requirement SR-025, Hazard H-20, Operational Constraint OC-14. |
 | 2.28 | 2026-04 | **Post-audit hardening alignment**: Audit initialization now fails closed if HMAC integrity cannot be established. WASM hosts must inject the audit HMAC key before init. Persistent audit key material and chain-seal state are stored separately (`audit_hmac_key.seal` and `audit_chain.seal`). Proxy admin routes (`/metrics`, `/reload`) are restricted to loopback callers. Node/TS sequence transport standardized on decimal-string over N-API with `bigint` in the wrapper. |
@@ -86,6 +87,8 @@ disagreeing, or faulted cases are treated as `Block`.
 | H-20 | Contextual Framing Bypass (Egress) | LLM generates code or structured data for a text-only task | SR-025: Contextual Anchor Validation (SA-080) enforces egress constraints based on ingress intent |
 | H-21 | Tool-Schema Bypass via unauthorised tool name | Agent or user invokes a tool not on the `allowed_tools` whitelist; agentic action proceeds outside operator-intended scope | SR-026: `validate_tools()` / `evaluateTools()` with `ToolNotAllowed` block (SA-081) |
 | H-22 | Availability DoS via catastrophic regex backtracking (ReDoS) | Operator submits a pathological regex pattern via `firewall.toml`; the evaluation thread hangs or OOMs under adversarial input | SR-027: Compile-time ReDoS validation via `SA-084` (`validate_regex_redos()`) in `FirewallConfig::validate()` |
+| H-23 | Obfuscation via Base64/Hex encoding | Attacker encodes malicious keywords (e.g. `api key`) to bypass simple text matching | SR-028: In-flight decoding and recursive payload analysis in both channels (SA-085) |
+| H-24 | Cloud/Infrastructure target extraction | Attacker targets internal metadata IPs (169.254.169.254) or K8s namespaces | SR-029: Mandatory blocking of known infra-targets in `SENSITIVE_TARGETS` (SA-085) |
 
 ---
 
@@ -151,8 +154,9 @@ Pure structural/lexical analysis — zero regex, zero ML. Diverse technology fro
 | RE-001         | Structural: giant token (>512 chars)  | Obfuscation via padding                    |
 | RE-002         | Injection markers                     | "ignore previous instructions", "[system]" |
 | RE-003         | Hijack phrases                        | "pretend you are", "roleplay as"           |
-| RE-004/RE-005  | Payload keywords / credential targets | "malware", "api key"                       |
+| RE-004/RE-005  | Payload keywords / credential targets | "malware", "api key", "dd if"              |
 | RE-006         | Zero-width chars (SA-019)             | U+200B, U+200C, U+200D                     |
+| RE-009B        | Encoded payloads detection           | Base64/Hex obfuscated attack strings       |
 | RE-010…RE-040  | Allow rules by intent class           | QuestionFactual, TaskCodeGeneration, …     |
 | RE-050, RE-099 | Allow rules for IP-050/IP-099         | StructuredOutput, ControlledCreative       |
 
@@ -1111,6 +1115,7 @@ items would be required for a formal certification effort, which is not planned:
 
 | SA-079 | **Streaming Egress Protection (Pillar 6)**: Implemented Aho-Corasick stateful scanner with `STREAM_EGRESS_OVERLAP_BYTES = 256`. Enables detection of split patterns across SSE chunks. Mandatory for `streaming_egress_enabled = true`. Fail-closed connection teardown via `RST_STREAM`. | Closed |
 | SA-084 | **ReDoS Prevention**: `FirewallConfig::validate()` performs compile-time AST analysis of all operator-supplied regex patterns via `validate_regex_redos()`. Rejects patterns exceeding: max length 1024 bytes, max nested quantifier depth 3, max alternation count 10. Implemented via `regex-syntax` crate. Closes H-22 / SR-027 / OC-14. | Closed |
+| SA-085 | **Red-Teaming Round 2 Hardening**: Integrated Base64/Hex decoding into Channel B (`RE-009B`) and Channel A (`sensitivity_guard`). Improved leetspeak resilience by moving mapping into the keyword-match layer. Expanded `SENSITIVE_TARGETS` with Cloud/K8s infra targets. Synchronized both channels to eliminate `DiagnosticDisagreement` on obfuscated attack vectors. | Closed |
 ---
 
 ## 10. Staged Configuration Reload (SA-077)

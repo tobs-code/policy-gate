@@ -7,9 +7,7 @@
 // #![deny(clippy::all)] is applied for code quality.
 #![deny(clippy::all)]
 
-use firewall_core::{
-    evaluate_messages, evaluate_output, evaluate_raw, init, next_sequence, ChatMessage, PromptInput,
-};
+use firewall_core::{evaluate_messages, evaluate_output, evaluate_raw, init, next_sequence, ChatMessage, PromptInput};
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
@@ -43,32 +41,8 @@ fn verdict_to_dict(py: Python<'_>, v: firewall_core::Verdict) -> PyResult<PyObje
             firewall_core::BlockReason::ExceededMaxLength => {
                 br_dict.set_item("type", "ExceededMaxLength")?;
             }
-            firewall_core::BlockReason::ToolNotAllowed {
-                tool_name,
-                allowed_tools,
-            } => {
-                br_dict.set_item("type", "ToolNotAllowed")?;
-                br_dict.set_item("tool_name", tool_name)?;
-                br_dict.set_item("allowed_tools", allowed_tools)?;
-            }
-            firewall_core::BlockReason::ProhibitedIntent { intent } => {
-                br_dict.set_item("type", "ProhibitedIntent")?;
-                br_dict.set_item("intent", format!("{:?}", intent))?;
-            }
-            firewall_core::BlockReason::SemanticTrigger { similarity, reason } => {
-                br_dict.set_item("type", "SemanticTrigger")?;
-                br_dict.set_item("similarity", *similarity)?;
-                br_dict.set_item("reason", reason.as_ref())?;
-            }
-            firewall_core::BlockReason::WatchdogTimeout => {
-                br_dict.set_item("type", "WatchdogTimeout")?;
-            }
-            firewall_core::BlockReason::UnknownTenant => {
-                br_dict.set_item("type", "UnknownTenant")?;
-            }
-            firewall_core::BlockReason::AnchorViolation { detail } => {
-                br_dict.set_item("type", "AnchorViolation")?;
-                br_dict.set_item("detail", detail.as_str())?;
+            _ => {
+                br_dict.set_item("type", format!("{:?}", br))?;
             }
         }
         d.set_item("block_reason", br_dict)?;
@@ -81,6 +55,9 @@ fn verdict_to_dict(py: Python<'_>, v: firewall_core::Verdict) -> PyResult<PyObje
 
 // ─── Python module ────────────────────────────────────────────────────────────
 
+/// Initialise the firewall. Must be called before evaluate_raw() or evaluate_messages().
+/// Raises RuntimeError if any safety-critical pattern fails to compile.
+/// Safe to call multiple times — returns cached result after first call.
 fn egress_verdict_to_dict(py: Python<'_>, v: firewall_core::EgressVerdict) -> PyResult<PyObject> {
     let d = PyDict::new_bound(py);
     d.set_item("is_pass", v.is_pass())?;
@@ -116,9 +93,6 @@ fn egress_verdict_to_dict(py: Python<'_>, v: firewall_core::EgressVerdict) -> Py
     Ok(d.into())
 }
 
-/// Initialise the firewall. Must be called before evaluate_raw() or evaluate_messages().
-/// Raises RuntimeError if any safety-critical pattern fails to compile.
-/// Safe to call multiple times — returns cached result after first call.
 #[pyfunction(name = "init")]
 fn firewall_init() -> PyResult<()> {
     init().map_err(|e| PyRuntimeError::new_err(format!("firewall init failed: {e}")))
@@ -154,17 +128,13 @@ fn firewall_evaluate_messages(py: Python<'_>, messages: &Bound<'_, PyList>) -> P
     let mut chat_messages: Vec<ChatMessage> = Vec::with_capacity(messages.len());
     for (i, item) in messages.iter().enumerate() {
         let d = item.downcast::<PyDict>().map_err(|_| {
-            PyRuntimeError::new_err(format!(
-                "messages[{i}] must be a dict with 'role' and 'content'"
-            ))
+            PyRuntimeError::new_err(format!("messages[{i}] must be a dict with 'role' and 'content'"))
         })?;
-        let role: String = d
-            .get_item("role")
+        let role: String = d.get_item("role")
             .map_err(|_| PyRuntimeError::new_err(format!("messages[{i}] missing 'role'")))?
             .ok_or_else(|| PyRuntimeError::new_err(format!("messages[{i}] missing 'role'")))?
             .extract()?;
-        let content: String = d
-            .get_item("content")
+        let content: String = d.get_item("content")
             .map_err(|_| PyRuntimeError::new_err(format!("messages[{i}] missing 'content'")))?
             .ok_or_else(|| PyRuntimeError::new_err(format!("messages[{i}] missing 'content'")))?
             .extract()?;
@@ -175,10 +145,8 @@ fn firewall_evaluate_messages(py: Python<'_>, messages: &Bound<'_, PyList>) -> P
 
     let result = PyDict::new_bound(py);
     result.set_item("is_pass", cv.is_pass)?;
-    result.set_item(
-        "first_block_index",
-        cv.first_block_index.map(|i| i as i64).unwrap_or(-1),
-    )?;
+    result.set_item("first_block_index",
+        cv.first_block_index.map(|i| i as i64).unwrap_or(-1))?;
 
     let verdicts_list = PyList::empty_bound(py);
     for v in cv.verdicts {
@@ -194,71 +162,12 @@ fn firewall_evaluate_messages(py: Python<'_>, messages: &Bound<'_, PyList>) -> P
 /// Returns a dict with keys:
 ///   is_pass (bool), verdict_kind (str), egress_reason (dict|None)
 #[pyfunction(name = "evaluate_output")]
-fn firewall_evaluate_output(
-    py: Python<'_>,
-    prompt: String,
-    response: String,
-) -> PyResult<PyObject> {
-    let prompt = PromptInput::new(prompt).map_err(|e| {
-        PyRuntimeError::new_err(format!("invalid prompt for egress evaluation: {:?}", e))
-    })?;
+fn firewall_evaluate_output(py: Python<'_>, prompt: String, response: String) -> PyResult<PyObject> {
+    let prompt = PromptInput::new(prompt)
+        .map_err(|e| PyRuntimeError::new_err(format!("invalid prompt for egress evaluation: {:?}", e)))?;
     let v = evaluate_output(&prompt, &response, next_sequence())
         .map_err(|e| PyRuntimeError::new_err(format!("egress evaluation failed: {e}")))?;
     egress_verdict_to_dict(py, v)
-}
-
-/// Validate a list of tool names against the configured allowed_tools whitelist.
-///
-/// Returns a dict with keys:
-///   is_valid (bool), invalid_tools (list[str]), allowed_tools (list[str]|None)
-///
-/// If allowed_tools is not configured (None), all tools are considered valid.
-#[pyfunction(name = "validate_tools")]
-fn firewall_validate_tools(py: Python<'_>, tool_names: Vec<String>) -> PyResult<PyObject> {
-    use firewall_core::config::get_current_config;
-
-    // OC-01 guard: fail closed if the firewall has not been initialised.
-    if get_current_config().is_none() {
-        return Err(pyo3::exceptions::PyRuntimeError::new_err(
-            "firewall not initialised (OC-01): call init() before validate_tools()",
-        ));
-    }
-
-    let result = PyDict::new_bound(py);
-
-    // Get current config
-    let config_opt = get_current_config();
-
-    let allowed_opt = config_opt
-        .as_ref()
-        .and_then(|cfg| cfg.allowed_tools.as_ref());
-
-    match allowed_opt {
-        None => {
-            // No whitelist configured - all tools allowed
-            result.set_item("is_valid", true)?;
-            result.set_item("invalid_tools", PyList::empty_bound(py))?;
-            result.set_item("allowed_tools", py.None())?;
-        }
-        Some(allowed) => {
-            // Check each tool against whitelist
-            let allowed_set: std::collections::HashSet<&String> = allowed.iter().collect();
-            let mut invalid = Vec::new();
-
-            for tool in &tool_names {
-                if !allowed_set.contains(tool) {
-                    invalid.push(tool.clone());
-                }
-            }
-
-            result.set_item("is_valid", invalid.is_empty())?;
-            let invalid_list = PyList::new_bound(py, invalid.iter().map(|s| s.as_str()));
-            result.set_item("invalid_tools", invalid_list)?;
-            result.set_item("allowed_tools", allowed.clone())?;
-        }
-    }
-
-    Ok(result.into())
 }
 
 /// policy-gate Python binding.
@@ -274,6 +183,5 @@ fn policy_gate(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(firewall_evaluate_raw, m)?)?;
     m.add_function(wrap_pyfunction!(firewall_evaluate_messages, m)?)?;
     m.add_function(wrap_pyfunction!(firewall_evaluate_output, m)?)?;
-    m.add_function(wrap_pyfunction!(firewall_validate_tools, m)?)?;
     Ok(())
 }

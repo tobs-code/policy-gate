@@ -20,3 +20,16 @@ firewall.toml
 docs/ENTERPRISE_ROADMAP.md
 docs/COMPETITIVE_ANALYSIS.md
 
+# Security seals and local state
+*.seal
+audit_hmac_key.seal
+audit_chain.seal
+
+# Local artifacts and notes
+1.md
+nul
+*.log
+.env
+.DS_Store
+Thumbs.db
+
